@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "goal": "Inspect the project and improve its onboarding instructions",
+  "jobs": [
+    {
+      "id": "read-build",
+      "goal": "Inspect build and test configuration. Report exact commands with source references and uncertainties. Do not edit files.",
+      "backend": "codex",
+      "permission": "read-only",
+      "includes": [],
+      "depends_on": []
+    },
+    {
+      "id": "read-docs",
+      "goal": "Inspect existing onboarding documentation. Identify missing steps and contradictions, with source references. Do not edit files.",
+      "backend": "codex",
+      "permission": "read-only",
+      "includes": [],
+      "depends_on": []
+    },
+    {
+      "id": "update-readme",
+      "goal": "Use the findings to correct onboarding instructions in README.md. Verify commands against the source configuration. Do not invent environment details. Report the changes and any remaining uncertainties.",
+      "backend": "codex",
+      "permission": "workspace-write",
+      "includes": [],
+      "depends_on": ["read-build", "read-docs"],
+      "write_scope": ["README.md"]
+    }
+  ]
+}

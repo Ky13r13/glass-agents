@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "agents": {
+    "worker": {
+      "backend": "claude-sdk",
+      "instructions": "Complete the operator's task in the existing project. Reuse existing code. Use project tools and ask advisor for focused help when useful. Respond to review feedback with a focused revision. Preserve unrelated files and project guidance.",
+      "write_scope": [
+        "**"
+      ],
+      "peers": [
+        "advisor"
+      ],
+      "project_tools": [
+        "tests"
+      ]
+    },
+    "reviewer": {
+      "backend": "claude-sdk",
+      "instructions": "Independently inspect the worker's result against the operator's task and actual project evidence. Return accept, revise, or reject with concrete feedback. Do not claim checks ran without tool evidence.",
+      "write_scope": [],
+      "peers": [],
+      "project_tools": [
+        "tests"
+      ]
+    },
+    "advisor": {
+      "backend": "claude-sdk",
+      "instructions": "Inspect the requested narrow question and return concise evidence, file paths and uncertainties. Do not edit files.",
+      "write_scope": [],
+      "peers": [],
+      "project_tools": []
+    }
+  },
+  "tools": {
+    "tests": {
+      "argv": [
+        "npm",
+        "test"
+      ],
+      "description": "Run the existing project test script.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "format": "text",
+      "timeout_seconds": 120
+    }
+  },
+  "mcp_servers": {},
+  "workflows": {
+    "default": {
+      "worker": "worker",
+      "reviewer": "reviewer",
+      "required_checks": [
+        "tests"
+      ],
+      "max_iterations": 3,
+      "max_agent_calls": 12,
+      "max_tool_calls": 40,
+      "max_depth": 3,
+      "timeout_seconds": 900,
+      "max_turns_per_agent": 12,
+      "max_reported_cost_usd": 5.0
+    }
+  }
+}

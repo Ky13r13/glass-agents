@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly client report draft
+
+[Timer]
+OnCalendar=Mon *-*-* 08:00:00
+Persistent=false
+Unit=agentctl-weekly-report.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "agents": {
+    "worker": {
+      "backend": "claude-sdk",
+      "instructions": "Propose a bounded development experiment using an existing registered strategy. Use the backtest tool and revise based on measured output and reviewer feedback. Preserve the dataset, split, cost model, evaluator and benchmark. Store notes beneath experiments. Report all attempted trials. Do not access broker accounts or place orders.",
+      "write_scope": [
+        "experiments/**"
+      ],
+      "peers": [
+        "advisor"
+      ],
+      "project_tools": [
+        "backtest"
+      ]
+    },
+    "reviewer": {
+      "backend": "claude-sdk",
+      "instructions": "Review the recorded experiment evidence, costs, benchmark comparison, drawdown, sample size and validation method. Return accept, revise or reject with concrete reasons. No candidate is an acceptable conclusion. Do not infer future performance from a favorable historical result.",
+      "write_scope": [],
+      "peers": [],
+      "project_tools": []
+    },
+    "advisor": {
+      "backend": "claude-sdk",
+      "instructions": "Inspect the requested narrow question and return concise evidence, file paths and uncertainties. Do not edit files.",
+      "write_scope": [],
+      "peers": [],
+      "project_tools": []
+    }
+  },
+  "tools": {
+    "backtest": {
+      "argv": [
+        "python3",
+        "tools/agent_backtest.py"
+      ],
+      "description": "Run your existing backtester through a JSON stdin/stdout adapter. Replace the placeholder interface before use.",
+      "format": "json",
+      "timeout_seconds": 120,
+      "context": {
+        "protocol_id": "replace_with_fixed_protocol",
+        "dataset_id": "development_only",
+        "split_id": "replace_with_fixed_splits",
+        "cost_model_id": "replace_with_fixed_costs",
+        "benchmark_id": "replace_with_fixed_benchmark"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "strategy_id": {
+            "type": "string",
+            "enum": [
+              "replace_with_registered_strategy"
+            ]
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "lookback": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 200
+              }
+            },
+            "required": [
+              "lookback"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "strategy_id",
+          "parameters"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "metrics": {
+            "type": "object"
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "metrics",
+          "artifacts"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "mcp_servers": {},
+  "workflows": {
+    "default": {
+      "worker": "worker",
+      "reviewer": "reviewer",
+      "required_checks": [],
+      "max_iterations": 3,
+      "max_agent_calls": 12,
+      "max_tool_calls": 40,
+      "max_depth": 3,
+      "timeout_seconds": 900,
+      "max_turns_per_agent": 12,
+      "max_reported_cost_usd": 5.0
+    }
+  }
+}

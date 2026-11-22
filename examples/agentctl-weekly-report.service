@@ -1,0 +1,9 @@
+[Unit]
+Description=Prepare a client report draft for human review
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/client-project
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=%h/.local/bin/agentctl -C %h/client-project workflow run client-report --goal "Prepare the report for the period and acceptance criteria in inputs/brief.md, using the input files it names. Reconcile totals, flag missing data, and produce a local draft for human review." --include inputs/brief.md
+TimeoutStartSec=2h
