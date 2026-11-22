@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import fnmatch
 import json
 from pathlib import Path
 import re
@@ -176,14 +177,23 @@ def validate_config(supplied):
     for name, workflow in workflows.items():
         if not valid_name(name) or not isinstance(workflow, dict):
             raise UserError("Each workflow needs a short name and an object definition.")
-        for role in ("worker", "reviewer"):
-            if workflow.get(role) not in agents:
-                raise UserError(f"Workflow {name} needs a configured {role}.")
-        if workflow["worker"] == workflow["reviewer"]:
-            raise UserError("Worker and reviewer must be distinct managed agents.")
-        reviewer = agents[workflow["reviewer"]]
-        if reviewer["write_scope"]:
-            raise UserError("The feedback reviewer must be configured read-only.")
+        kind = workflow.setdefault("type", "feedback")
+        if kind == "feedback":
+            for role in ("worker", "reviewer"):
+                if workflow.get(role) not in agents:
+                    raise UserError(f"Workflow {name} needs a configured {role}.")
+            if workflow["worker"] == workflow["reviewer"]:
+                raise UserError("Worker and reviewer must be distinct managed agents.")
+            reviewer = agents[workflow["reviewer"]]
+            if reviewer["write_scope"]:
+                raise UserError("The feedback reviewer must be configured read-only.")
+        elif kind == "single":
+            if workflow.get("agent") not in agents:
+                raise UserError(f"Workflow {name} needs a configured agent.")
+        elif kind == "swarm":
+            validate_swarm(name, workflow, agents)
+        else:
+            raise UserError(f"Workflow {name} type must be feedback, single, or swarm.")
         for key, default in LIMITS.items():
             workflow.setdefault(key, default)
             value = workflow[key]
@@ -196,6 +206,86 @@ def validate_config(supplied):
         if not isinstance(workflow["required_checks"], list) or any(not isinstance(t, str) or t not in tools for t in workflow["required_checks"]):
             raise UserError("required_checks must name configured project tools.")
     return config
+
+
+SWARM_WRITERS = {"claude-sdk", "codex", "opencode"}
+SWARM_LIMITS = {"replicas": (1, 1, 10), "max_rounds": (3, 1, 20), "max_parallel": (4, 1, 16),
+                "max_finalists": (3, 1, 16), "min_accepts": (1, 1, 16), "stable_rounds": (1, 1, 20)}
+MAX_SWARM_SLOTS = 16
+
+
+def validate_swarm(name, workflow, agents):
+    candidates, critics = workflow.get("candidates"), workflow.get("critics")
+    for field, value in (("candidates", candidates), ("critics", critics)):
+        if not isinstance(value, list) or not value or len(set(value)) != len(value) or any(a not in agents for a in value):
+            raise UserError(f"Swarm {name} {field} must be a nonempty list of distinct configured agents.")
+    for agent in candidates:
+        if agents[agent]["backend"] not in SWARM_WRITERS or not agents[agent]["write_scope"]:
+            raise UserError(f"Swarm candidate {agent} needs a write scope and a claude-sdk, codex or opencode backend.")
+    for agent in critics:
+        if agents[agent]["write_scope"] or agent in candidates:
+            raise UserError(f"Swarm critic {agent} must be a read-only agent that is not also a candidate.")
+    for key, (default, low, high) in SWARM_LIMITS.items():
+        workflow.setdefault(key, default)
+        if type(workflow[key]) is not int or not low <= workflow[key] <= high:
+            raise UserError(f"Swarm {name} {key} must be an integer from {low} to {high}.")
+    if len(candidates) * workflow["replicas"] > MAX_SWARM_SLOTS:
+        raise UserError(f"Swarm {name} has more than {MAX_SWARM_SLOTS} candidate workspaces (candidates × replicas).")
+    if workflow["min_accepts"] > len(critics):
+        raise UserError(f"Swarm {name} min_accepts cannot exceed the number of critics.")
+    if workflow["stable_rounds"] > workflow["max_rounds"]:
+        raise UserError(f"Swarm {name} stable_rounds cannot exceed max_rounds.")
+    workflow.setdefault("mode", "independent")
+    if workflow["mode"] not in {"independent", "adopt_leader"}:
+        raise UserError(f"Swarm {name} mode must be independent or adopt_leader.")
+    for flag in ("apply_winner", "keep_worktrees"):
+        workflow.setdefault(flag, False)
+        if not isinstance(workflow[flag], bool):
+            raise UserError(f"Swarm {name} {flag} must be true or false.")
+
+
+def covered(scope, patterns):
+    return any(fnmatch.fnmatch(scope, p) or scope.startswith(p.rstrip("/") + "/") for p in patterns)
+
+
+def ask_config(config, agent, folder=None, scopes=(), read_only=False, checks=(), limits_from="default"):
+    """Derive a one-agent workflow; scopes and folders can only narrow configured permissions."""
+    config = copy.deepcopy(config)
+    if agent not in config["agents"]:
+        raise UserError(f"Unknown managed agent: {agent}. Run agents list to see configured names.")
+    spec = config["agents"][agent]
+    requested = [s.strip() for s in scopes]
+    if folder:
+        clean = Path(folder).as_posix().strip("/")
+        if not clean or clean == "." or Path(clean).is_absolute() or ".." in Path(clean).parts:
+            raise UserError("--in must be a relative folder inside the project.")
+        requested.append(clean + "/**")
+        spec["instructions"] += f"\n\nOperator constraint: work inside the project folder {clean}/ and do not change files elsewhere."
+    if read_only:
+        narrowed = []
+    elif requested:
+        if not spec["write_scope"]:
+            raise UserError(f"Agent {agent} is read-only in agents.json; a command-line scope cannot grant write access.")
+        for scope in requested:
+            if not scope or Path(scope).is_absolute() or ".." in Path(scope).parts or not covered(scope, spec["write_scope"]):
+                raise UserError(f"Scope {scope} is not inside {agent}'s configured write_scope {spec['write_scope']}; it can only be narrowed.")
+        narrowed = requested
+    else:
+        narrowed = spec["write_scope"]
+    if narrowed != spec["write_scope"]:
+        spec["write_scope"] = narrowed
+        # Delegated writers cannot exceed the narrowed caller.
+        for peer in list(spec["peers"]):
+            if config["agents"][peer]["write_scope"]:
+                if narrowed:
+                    config["agents"][peer]["write_scope"] = list(narrowed)
+                else:
+                    spec["peers"].remove(peer)
+    base = config["workflows"].get(limits_from, {})
+    workflow = {"type": "single", "agent": agent, "required_checks": list(checks)}
+    workflow.update({k: base[k] for k in LIMITS if k in base})
+    config["workflows"]["agentctl-ask"] = workflow
+    return validate_config(config)
 
 
 def load_agents(root, path=None):
@@ -224,11 +314,33 @@ def initialize_agents(root):
             "next": "Review agent scopes and add your project's commands to tools before running a workflow."}
 
 
-def prepare_feedback(root, cfg, goal, workflow="default", path=None, includes=(), demo=False, carry="", extra="", parent=None, model=None, budget=None):
+def run_succeeded(record, interactive_ok=False):
+    """Exit-status rule: managed runs need an accepted loop (or a completed single-agent task with passing checks)."""
+    statuses = {"completed", "interactive_closed"} if interactive_ok else {"completed"}
+    if record["status"] not in statuses:
+        return False
+    return record["backend"] != "claude-sdk" or record.get("loop_outcome") in {"accepted", "completed"}
+
+
+def prepare_feedback(root, cfg, goal, workflow="default", path=None, includes=(), demo=False, carry="", extra="", parent=None, model=None, budget=None,
+                     ask=None, replicas=None, rounds=None):
     from .runner import prepare_run
     config, source = load_agents(root, path)
+    if ask:
+        config = ask_config(config, limits_from=workflow, **ask)
+        workflow = "agentctl-ask"
     if workflow not in config["workflows"]:
         raise UserError("Unknown feedback workflow: " + workflow)
+    if replicas is not None or rounds is not None:
+        spec = config["workflows"][workflow]
+        if spec["type"] != "swarm":
+            raise UserError("--replicas and --rounds apply to swarm workflows only.")
+        if replicas is not None:
+            spec["replicas"] = replicas
+        if rounds is not None:
+            spec["max_rounds"] = rounds
+            spec["stable_rounds"] = min(spec["stable_rounds"], rounds)
+        config = validate_config(config)
     if model:
         for agent in config["agents"].values():
             if agent["backend"] == "claude-sdk":
@@ -237,7 +349,7 @@ def prepare_feedback(root, cfg, goal, workflow="default", path=None, includes=()
                          carry=carry, extra=extra, parent=parent, model=model, budget=budget)
     frozen = Path(record["folder"]) / "agents-config.json"
     write_json(frozen, config)
-    record.update(agent_workflow=workflow, agents_config_source=str(source),
+    record.update(agent_workflow=workflow, workflow_type=config["workflows"][workflow]["type"], agents_config_source=str(source),
                   agents_config_sha256=digest(read_text(source)), frozen_agents_sha256=digest(read_text(frozen)),
                   agent_names=list(config["agents"]), loop_demo=demo)
     from .common import Store

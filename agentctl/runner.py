@@ -221,8 +221,12 @@ def execute_run(root, cfg, record, stop=None, handoff=True, quiet=False, observe
             elif kind == "agentctl.loop.finished":
                 record.update(loop_outcome=event.get("outcome"), loop_iteration=event.get("iteration"),
                               reported_cost_usd=event.get("reported_cost_usd"))
-            if not quiet and kind in {"agentctl.agent.started", "agentctl.review.decision", "agentctl.revision.requested", "agentctl.loop.finished"}:
-                print(safe_terminal(f"[{actor}] {kind.removeprefix('agentctl.')} " + str(event.get("outcome", event.get("review", "")))[:200]), flush=True)
+                if event.get("winner"):
+                    record["swarm_winner"] = event["winner"]
+            if not quiet and kind in {"agentctl.agent.started", "agentctl.review.decision", "agentctl.revision.requested", "agentctl.loop.finished",
+                                      "agentctl.swarm.round", "agentctl.candidate.dropped"}:
+                detail = event.get("summary") or event.get("reason") or event.get("outcome", event.get("review", ""))
+                print(safe_terminal(f"[{actor}] {kind.removeprefix('agentctl.')} " + str(detail)[:200]), flush=True)
             notify(event)
             return
         if backend == "opencode":

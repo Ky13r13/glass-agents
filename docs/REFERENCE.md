@@ -6,8 +6,11 @@ Global directory option: `agentctl -C /path/to/project COMMAND`. The directory f
 |---|---|
 | `agents init` | Attach portable managed agent definitions to the exact selected project directory. |
 | `agents list` / `agents validate` | Inspect roles, tools, workflow limits and optional runtime availability without launching agents. |
-| `agents run GOAL [--workflow default] [--config PATH] [--prepare-only]` | Run bounded worker/check/reviewer feedback with automatic revisions. |
-| `agents demo [--output NEW_DIR]` | Run isolated scripted agents with real tools and check-driven feedback; no model calls. |
+| `agents run GOAL [--workflow default] [--config PATH] [--prepare-only]` | Run the selected workflow: worker/check/reviewer feedback, or a swarm. |
+| `agents run GOAL --workflow SWARM [--replicas N] [--rounds N]` | Run parallel candidates in isolated Git worktrees; override copies per candidate (1–10) or maximum rounds (1–20). |
+| `agents ask NAME TASK [--in FOLDER] [--scope GLOB] [--read-only] [--check TOOL] [--prepare-only]` | Give one named agent one task. `--in`, `--scope` and `--read-only` can only narrow its configured write scope. No reviewer, no revision. |
+| `agents apply ID [--candidate SLOT] [--allow-unaccepted] [--no-checks]` | Apply a finished swarm's winner (or chosen candidate) to the working tree and rerun required checks there. |
+| `agents demo [--output NEW_DIR] [--swarm]` | Run isolated scripted agents with real tools and check-driven feedback; `--swarm` uses real worktrees. No model calls. |
 | `agents message ID --to NAME --text TEXT` | Queue operator feedback for a managed agent. |
 | `agents messages ID [--to NAME]` | Read a run's managed-agent mailbox. |
 | `agents events ID [--follow]` | Inspect the actual event stream. |
@@ -75,9 +78,9 @@ A dependency's successful execution allows the next job to start; it does not ce
 
 ## Exit codes and failure records
 
-Normal success is exit 0. A failed scripted run or team returns 1; invalid arguments/configuration or a missing runtime usually returns 2. `verify` returns a conventional nonzero check code when possible. An interrupted top-level command returns 130, though an interrupted active run can return 1 after persisting its cancellation state.
+Normal success is exit 0. Managed runs return 0 only when the loop outcome is `accepted` (feedback or swarm) or `completed` (an `agents ask` task whose required checks passed); `checks_failed`, `rejected`, `limit_reached`, `failed` and `cancelled` return 1. `agents apply` returns 1 when integration checks fail. A failed scripted run or team returns 1; invalid arguments/configuration or a missing runtime usually returns 2. `verify` returns a conventional nonzero check code when possible. An interrupted top-level command returns 130, though an interrupted active run can return 1 after persisting its cancellation state.
 
-No automatic retries or merges occur. After a crash, a record can remain `running`; inspect its artifacts and start a fresh continuation. Locks are released by the OS when the holding process exits. Do not delete the SQLite file to clear a lock.
+No automatic retries occur. Merges happen only through a swarm's explicit integration step (`apply_winner` or `agents apply`), which refuses to run if scanned project files changed since the swarm started. After a crash, a record can remain `running`; inspect its artifacts and start a fresh continuation. Locks are released by the OS when the holding process exits. Do not delete the SQLite file to clear a lock.
 
 ## Official interfaces used
 

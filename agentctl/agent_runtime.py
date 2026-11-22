@@ -90,10 +90,13 @@ def read_mail(folder, recipient=None):
 
 
 class AgentRuntime:
-    def __init__(self, root, cfg, folder, config, workflow, goal, context="", stop=None, emit=None, driver=None):
+    def __init__(self, root, cfg, folder, config, workflow, goal, context="", stop=None, emit=None, driver=None,
+                 spec=None, parent=None):
         self.root = Path(root).resolve()
         self.cfg, self.folder, self.config = cfg, Path(folder), config
-        self.workflow_name, self.workflow, self.goal = workflow, config["workflows"][workflow], goal
+        self.workflow_name, self.workflow, self.goal = workflow, spec or config["workflows"][workflow], goal
+        # A parent (for example a swarm controller) owns shared cancellation, runtime and cost limits.
+        self.parent = parent
         self.context = context
         self.stop = stop or threading.Event()
         self.callback, self.driver = emit, driver
@@ -121,12 +124,18 @@ class AgentRuntime:
                 self.callback(event)
 
     def budget(self):
+        if self.parent:
+            self.parent.budget()
         if self.stop.is_set():
             raise UserError("Managed agent run cancelled.")
         if time.monotonic() >= self.deadline:
             raise BudgetReached("Workflow runtime limit reached.")
         if self.state["reported_cost_usd"] >= self.workflow["max_reported_cost_usd"]:
             raise BudgetReached("Reported model-cost estimate limit reached.")
+
+    def remaining_cost(self):
+        own = self.workflow["max_reported_cost_usd"] - self.state["reported_cost_usd"]
+        return min(own, self.parent.remaining_cost()) if self.parent else own
 
     def reserve_tool(self):
         self.budget()
@@ -321,7 +330,7 @@ class AgentRuntime:
             self.budget()
             return evidence
 
-    async def call_agent(self, actor, task, stack=(), reviewer=False):
+    async def call_agent(self, actor, task, stack=(), reviewer=False, schema=None):
         self.budget()
         if not isinstance(task, str) or not task.strip() or len(task) > 24000:
             raise UserError("Peer task must contain 1–24000 characters.")
@@ -338,7 +347,7 @@ class AgentRuntime:
                 "status": "running", "started": now(), "parent": stack[-1] if stack else None, "task": task[:1200]}
         self.state["agent_activity"][call_id] = info
         self.emit("agent.started", actor, **{k: v for k, v in info.items() if k != "name"})
-        schema = REVIEW_SCHEMA if reviewer else WORKER_SCHEMA
+        schema = schema or (REVIEW_SCHEMA if reviewer else WORKER_SCHEMA)
         try:
             from .context import build_packet
             before = snapshot(self.root, self.cfg)
@@ -466,6 +475,35 @@ class AgentRuntime:
             self.stop.set()
         except Exception as exc:
             outcome, error = ("cancelled" if self.stop.is_set() else "failed"), str(exc)
+        return self.finish(outcome, error)
+
+    async def run_single(self):
+        """One named agent, one task, then any required checks. No reviewer, no revision."""
+        outcome, error = "failed", None
+        agent = self.workflow["agent"]
+        self.emit("loop.started", workflow=self.workflow_name, goal=self.goal, agents=[agent])
+        try:
+            self.budget()
+            self.state["iteration"] = 1
+            result = await self.call_agent(agent, "Complete the operator's goal within your configured scope and report what you actually did.")
+            checks = [await self.project_tool("controller", tool, {}) for tool in self.workflow["required_checks"]]
+            current = snapshot(self.root, self.cfg)["fingerprint"]
+            checks_pass = all(c["status"] == "passed" and c["fingerprint"] == current and not c["source_changed_during_check"] for c in checks)
+            self.state["history"].append({"iteration": 1, "worker": result, "required_checks": [c["call_id"] for c in checks],
+                                          "checks_pass": checks_pass})
+            outcome = "completed" if checks_pass and not self.state["integrity_failure"] else "checks_failed"
+        except (BudgetReached, asyncio.TimeoutError) as exc:
+            outcome, error = "limit_reached", str(exc) or "Workflow runtime limit reached."
+        except asyncio.CancelledError:
+            outcome, error = "cancelled", "Managed run cancelled."
+            self.stop.set()
+        except Exception as exc:
+            outcome, error = ("cancelled" if self.stop.is_set() else "failed"), str(exc)
+        return self.finish(outcome, error, title="Managed agent task",
+                           note="Completion means the agent reported a result and configured checks passed; it is not a correctness guarantee.")
+
+    def finish(self, outcome, error, title="Managed feedback workflow",
+               note="Acceptance is the reviewer's structured decision plus configured check gates; it is not a general correctness guarantee."):
         if outcome in {"limit_reached", "cancelled", "failed"}:
             self.stop.set()
         self.state.update(status=outcome, finished=now(), error=error)
@@ -473,15 +511,16 @@ class AgentRuntime:
         self.emit("loop.finished", outcome=outcome, iteration=self.state["iteration"], error=error,
                   agent_calls=self.state["agent_calls"], tool_calls=self.state["tool_calls"],
                   reported_cost_usd=self.state["reported_cost_usd"] if self.state["cost_reports"] else None, usage=self.state["usage"])
-        lines = ["# Managed feedback workflow", "", f"Goal: {self.goal}", f"Outcome: {outcome}",
+        lines = [f"# {title}", "", f"Goal: {self.goal}", f"Outcome: {outcome}",
                  f"Iterations: {self.state['iteration']}", f"Agent calls: {self.state['agent_calls']}",
-                 f"Tool calls: {self.state['tool_calls']}", "",
-                 "Acceptance is the reviewer's structured decision plus configured check gates; it is not a general correctness guarantee."]
+                 f"Tool calls: {self.state['tool_calls']}", "", note]
         if not self.workflow["required_checks"]:
-            lines.append("No required command checks were configured; acceptance is advisory review only.")
+            lines.append("No required command checks were configured; the outcome is advisory only.")
         if self.state["history"]:
             last = self.state["history"][-1]
-            lines += ["", "## Worker result", last["worker"]["summary"], "", "## Reviewer feedback", last["review"]["feedback"]]
+            lines += ["", "## Worker result", last["worker"]["summary"]]
+            if "review" in last:
+                lines += ["", "## Reviewer feedback", last["review"]["feedback"]]
         if error:
             lines += ["", "## Stopping reason", error]
         lines += ["", f"Full loop state: {self.loop_folder / 'state.json'}",

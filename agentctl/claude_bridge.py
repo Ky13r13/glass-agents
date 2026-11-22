@@ -75,7 +75,7 @@ async def sdk_call(runtime, actor, prompt, stack, schema):
                 raise UserError("Root project guidance exceeds the configured file limit.")
             guidance = "\n\nApplicable root project guidance:\n" + read_text(path)
             break
-    remaining_cost = max(0.001, runtime.workflow["max_reported_cost_usd"] - runtime.state["reported_cost_usd"])
+    remaining_cost = max(0.001, runtime.remaining_cost())
     kwargs = {
         "tools": [], "mcp_servers": servers, "strict_mcp_config": True,
         "allowed_tools": allowed, "can_use_tool": permission,

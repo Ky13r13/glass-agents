@@ -22,6 +22,8 @@ flowchart TD
 |---|---|
 | agent_config.py / agent_commands.py | Portable project definitions, schema validation, frozen configuration, managed-run CLI, messages and event inspection. |
 | agent_runtime.py | Bounded worker/check/reviewer controller, structured decisions, scoped file tools, project commands, delegation and local mailboxes. |
+| swarm.py | Parallel candidate runtimes in separate worktrees, shared swarm budget, critic ranking, feedback rounds, convergence and freshness-checked integration. |
+| worktree.py | Git baseline from the working tree via a temporary index, detached worktrees, candidate commits/diffs, resets, review branches and patch application; hooks disabled. |
 | claude_bridge.py / feedback_worker.py | Optional SDK sessions, in-process MCP tools, hook events, structured results and isolated worker lifecycle. |
 | dashboard.py and web/ | Loopback GUI, session-token HTTP API, queued tasks, dependency handoffs, cancellation and packaged interface assets. |
 | adapters.py | OpenCode command adapter, display event normalization, public connection hints and Linux process socket sampling. |
@@ -73,11 +75,25 @@ For long-lived work, store durable design choices in the project's normal docume
 1. Add a model-specific tokenizer if measurements show the estimator matters; keep unknown runtime overhead explicit.
 2. Add syntax-aware retrieval when filename and lexical ranking misses important dependencies.
 3. Add measured routing based on representative successful tasks, latency, and total reported tokens.
-4. Add isolated worktrees and an integration stage before permitting concurrent writers.
+4. Isolated worktrees and an integration stage now exist for swarm candidates (see below). Extending them to `team` graphs and the dashboard scheduler, and combining non-conflicting changes from several candidates, remain open.
 5. Add a structured planning model as an opt-in capability; retain deterministic graph validation.
 6. Add remote deployment only with explicit host configuration and an accountable process lifecycle.
 
 The first release uses SQLite and files so its behavior can be inspected without running another database or web service.
+
+## Swarm workflows and worktree integration
+
+A swarm's feedback_worker process runs SwarmRuntime instead of the single worker/reviewer loop. SwarmRuntime creates one AgentRuntime per candidate slot, rooted at that slot's worktree. All file tools, scope audits, snapshots, project commands and CLI peers therefore operate on the candidate's files. Each child runtime defers cancellation, wall-clock and cost limits to the swarm. Call, tool and depth limits stay per candidate.
+
+Candidate events are relayed with an actor of the form slot.agent. Checks inside a worktree are therefore never recorded as verification evidence for the user's checkout. Only the integration step emits controller check events against the real project root.
+
+The run still holds the project's exclusive operation lock, so no other managed writer changes the checkout while a swarm runs. Integration has three guards:
+
+- It compares the current scanned-source fingerprint with the fingerprint taken at the baseline.
+- It runs `git apply --check` before applying.
+- It changes the working tree only, never the index or refs.
+
+CLI-launched Codex and OpenCode peers of a candidate keep their run records inside that candidate's worktree state directory. They are linked from peer.link events.
 
 ## Version 0.3 dashboard
 

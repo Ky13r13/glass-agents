@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from . import __version__
+from .agent_config import run_succeeded
 from .common import Store, UserError, load_config, lock, new_id, now, project_root, read_text, require_init, safe_terminal, state_dir, write_json
 from .context import packet_summary
 from .local import Ollama, benchmark, doctor, serve, setup_model
@@ -265,11 +266,11 @@ def dispatch(args):
                 return 0
             rec = interactive(root, cfg, rec) if args.interactive else execute_run(root, cfg, rec)
             print_run(rec)
-            return 0 if rec["status"] in {"completed", "interactive_closed"} and (rec["backend"] != "claude-sdk" or rec.get("loop_outcome") == "accepted") else 1
+            return 0 if run_succeeded(rec, interactive_ok=True) else 1
         if cmd == "run":
             rec = execute_run(root, cfg, store.get(args.id))
             print_run(rec)
-            return 0 if rec["status"] == "completed" and (rec["backend"] != "claude-sdk" or rec.get("loop_outcome") == "accepted") else 1
+            return 0 if run_succeeded(rec) else 1
         if cmd == "checkpoint":
             print(checkpoint(root, cfg, store.get(args.run_id), args.note, args.next_action))
             return 0

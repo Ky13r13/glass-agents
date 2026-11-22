@@ -3,22 +3,32 @@ from __future__ import annotations
 from pathlib import Path
 
 from .common import UserError, digest, now, read_text, state_dir, tokens, write_json, write_text
-from .project import guidance_sources, inventory, rank_files, redact, terms
+from .project import goal_symbol_spans, guidance_sources, inventory, rank_files, redact, terms
 
 
-def excerpt(content, goal, line_limit=110):
+def excerpt(content, goal, line_limit=110, focus=()):
     lines = content.splitlines()
     if len(lines) <= line_limit:
         selected = list(range(len(lines)))
     else:
         words = terms(goal)
         hits = [i for i, line in enumerate(lines) if any(w in line.lower() for w in words)]
-        chosen = set(range(min(18, len(lines))))
+        # Whole definitions of symbols named in the task come first (1-based
+        # inclusive spans), then the file head, then keyword hits.
+        chosen = set()
+        for start, end in focus:
+            for i in range(max(0, start - 2), min(len(lines), end)):
+                if len(chosen) < line_limit:
+                    chosen.add(i)
+        head = min(6 if focus else 18, len(lines))
+        for i in range(head):
+            if len(chosen) < line_limit:
+                chosen.add(i)
         for hit in hits:
             for i in range(max(0, hit - 3), min(len(lines), hit + 7)):
                 if len(chosen) < line_limit:
                     chosen.add(i)
-        if not hits:
+        if not hits and not focus:
             chosen.update(range(min(line_limit, len(lines))))
         selected = sorted(chosen)
     output, last = [], -1
@@ -99,10 +109,11 @@ def build_packet(root, cfg, goal, run_dir, backend="codex", includes=(), carry="
                         pending_guides.append(key)
                     break
         limit = 100 if rel in requested else 70
-        part, line_numbers = excerpt(f["text"], goal, limit)
+        focus = goal_symbol_spans(f, goal)
+        part, line_numbers = excerpt(f["text"], goal, limit, focus)
         chunk = prefix + f"\n## Source: {rel}\nReason: {'; '.join(reasons)}\n```text\n{part}\n```\n"
         if tokens(body + chunk) + auto_tokens > budget:
-            part, line_numbers = excerpt(f["text"], goal, 24)
+            part, line_numbers = excerpt(f["text"], goal, 24, focus)
             chunk = prefix + f"\n## Source: {rel}\nReason: {'; '.join(reasons)}\n```text\n{part}\n```\n"
         if tokens(body + chunk) + auto_tokens > budget:
             if rel in requested:

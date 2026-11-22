@@ -20,9 +20,26 @@ Configure provider authentication in the environment before running real SDK age
 
 The controller runs **worker → command checks → reviewer → revision**, until accepted, rejected or bounded. Failed required checks cannot be overridden by a favorable reviewer response. The default skeleton has no command gates, so its initial acceptance is advisory review.
 
+Talk to one agent directly, within limits you set:
+
+~~~bash
+agentctl -C /path/to/your/project agents ask coder "Add CSV quoting" --in src/export
+agentctl -C /path/to/your/project agents ask reviewer "Explain the import pipeline" --read-only
+~~~
+
+Or let several agents (Claude SDK, Codex, OpenCode) solve the same task in parallel. Each works in its own Git worktree; read-only critics (including a local model) judge them, and feedback rounds repeat until one candidate passes the checks, is accepted and holds the lead:
+
+~~~bash
+cp examples/agents-swarm.json /path/to/your/project/.agentctl/agents.json
+agentctl -C /path/to/your/project agents run "Fix the CSV quoting bug" --workflow converge --replicas 2
+agentctl -C /path/to/your/project agents apply RUN_ID   # apply the winner and rerun checks
+~~~
+
 ~~~bash
 # Offline scripted agents; real tools, delegation, messages and check-driven revision.
 agentctl agents demo
+# Offline swarm: scripted candidates in real worktrees, a scripted critic, feedback rounds, integration.
+agentctl agents demo --swarm
 
 # Watch CLI or dashboard-launched managed sessions.
 agentctl -C /path/to/your/project dashboard
@@ -31,7 +48,7 @@ agentctl -C /path/to/your/project dashboard
 agentctl -C /path/to/your/project agents message RUN_ID --to worker --text "Focus on the failing test."
 ~~~
 
-See [Portable agent loop guide](docs/AGENT_LOOPS.md) for data flow, tool input/output contracts, mixed-backend delegation, limits and SDK setup.
+See [Portable agent loop guide](docs/AGENT_LOOPS.md) for single-agent tasks, swarm configuration and integration, data flow, tool input/output contracts, mixed-backend delegation, limits and SDK setup.
 
 ## Open the dashboard
 
@@ -137,6 +154,8 @@ Prepared runs are refused if the packet, scanned source, or observed instruction
 | `.agentctl/runs/<id>/answer.md` | Scripted agent's final answer. |
 | `.agentctl/runs/<id>/stderr.log` | Provider diagnostics. |
 | `.agentctl/plans/` and `.agentctl/teams/` | Generated job graphs and execution results. |
+| `.agentctl/worktrees/<id>/` | Temporary swarm candidate worktrees (removed after the run unless `keep_worktrees`). |
+| `.agentctl/runs/<id>/candidates/`, `winner.patch` | Swarm per-round patches and the winning or best candidate's patch. |
 
 Runtime state is Git-ignored using `.agentctl/.gitignore`. The generated root `AGENTS.md` is a normal project file you can review and commit. Existing root guidance is preserved byte-for-byte. `inspect` recommends reusing architecture documents and creating missing ones only where justified; it does not fabricate a complete architecture from filenames or generate empty decision logs.
 
@@ -204,7 +223,7 @@ Planning is a transparent heuristic. A broad task with matches in multiple compo
 
 The scheduler validates the graph, allows up to two read-only hosted workers to overlap, and runs writing jobs exclusively. No readers overlap a writer. Failed dependencies block dependent jobs. Results passed to a later worker are concise excerpts with artifact paths rather than whole transcripts.
 
-Writers share the project and are serialized. Parallel writing worktrees and automatic merging are not implemented. `write_scope` is an instruction/audit boundary: changes outside it are detected after the run and reported, not automatically rolled back. Codex's sandbox is the execution boundary. Avoid editing the same source manually while a scripted team is running, since external changes can invalidate evidence.
+In `team` graphs and the dashboard, writers share the project and are serialized. Only swarm workflows write concurrently, each candidate in a separate Git worktree; their results reach your checkout through an explicit integration step that refuses to run when the project changed. There is no automatic merging of several candidates together. `write_scope` is an instruction/audit boundary: changes outside it are detected after the run and reported, not automatically rolled back. Codex's sandbox is the execution boundary. Avoid editing the same source manually while a scripted team is running, since external changes can invalidate evidence.
 
 ## Reusable workflow agents
 

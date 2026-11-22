@@ -23,6 +23,8 @@
 - Bounded worker/check/reviewer feedback loops, scoped custom tools and managed peer delegation.
 - Agent mailboxes, typed project-command inputs/outputs and dashboard monitoring of CLI-launched managed runs.
 - Fresh source context for each managed call and current check evidence required for gated acceptance.
+- `agents ask`: one named agent, one task, with folder/scope/read-only narrowing and optional check gates.
+- Swarm workflows: parallel mixed-backend candidates in isolated Git worktrees, check-gated critic ranking, feedback rounds, convergence, review branches and freshness-checked integration (`agents apply`).
 
 ## Next work, in order
 
@@ -30,7 +32,7 @@
 2. Improve retrieval only where measured misses occur: symbol extraction and import/dependency relationships before adding an embedding service.
 3. Add optional structured LLM planning when the simple component heuristic fails to form useful tasks. Keep graph validation and explicit execution separate.
 4. Expand recovery beyond local run records and add richer native Codex session integration if long unattended runs are needed.
-5. Implement separate Git worktrees, conflict detection and final integration verification before allowing concurrent writers.
+5. Reuse the swarm worktree layer for concurrent `team`/dashboard writers, add a dashboard swarm leaderboard view, and consider combining non-conflicting changes from several candidates with final integration verification.
 6. Add remote worker deployment and authenticated remote model hosts only when there is an actual additional machine to target.
 
 Not included: automatic model-quality certification, a hard hosted-token spending cap, driver installation, remote deployment, automatic merging, vector databases, fine-tuning, or guaranteed autonomous local coding.

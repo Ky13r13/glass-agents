@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import ast
 from collections import Counter
 import fnmatch
 import json
+import math
 import os
 from pathlib import Path
+import posixpath
 import re
 import tomllib
 
@@ -187,9 +190,156 @@ def terms(goal):
     return set(re.findall(r"[a-zA-Z][a-zA-Z0-9_]{2,}", goal.lower())) - STOPWORDS
 
 
+# Lexical definition/import extraction. Regex/ast only: no project code runs and
+# no model is called. It is a ranking aid, not a type-resolved symbol index.
+_JS = r"[A-Za-z_$][\w$]*"
+_C_KEYWORDS = {"if", "for", "while", "switch", "return", "sizeof", "catch", "else", "do", "case", "new", "delete", "function"}
+DEFINITION_PATTERNS = {
+    (".js", ".jsx", ".ts", ".tsx"): [
+        rf"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?|class|interface|type|enum)\s+({_JS})",
+        rf"^\s*(?:export\s+)?(?:const|let|var)\s+({_JS})\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|{_JS}\s*=>)",
+        rf"^\s+(?:async\s+)?(?:static\s+)?({_JS})\s*\([^)]*\)\s*\{{"],
+    (".go",): [r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)", r"^type\s+([A-Za-z_]\w*)"],
+    (".rs",): [r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:fn|struct|enum|trait|type|mod)\s+([A-Za-z_]\w*)"],
+    (".java",): [r"^\s*(?:(?:public|private|protected|static|final|abstract)\s+)*(?:class|interface|enum|record)\s+([A-Za-z_]\w*)",
+                 r"^\s+(?:(?:public|private|protected|static|final|abstract|synchronized)\s+)+[\w<>\[\],.?\s]+\s([A-Za-z_]\w*)\s*\("],
+    (".c", ".cc", ".cpp", ".h", ".hpp"): [r"^\s*(?:class|struct|enum(?:\s+class)?|namespace)\s+([A-Za-z_]\w*)",
+                                         r"^[A-Za-z_][\w\s*&:<>,]*?[\s*&:]([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?\{?\s*$"],
+    (".sh",): [r"^\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{"],
+}
+_SYMBOL_CACHE = {}
+
+
+def _python_definitions(text):
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    found = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            found.append((node.name, node.lineno, node.end_lineno or node.lineno))
+            if isinstance(node, ast.ClassDef):
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        span = (item.lineno, item.end_lineno or item.lineno)
+                        found += [(item.name, *span), (node.name + "." + item.name, *span)]
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                if isinstance(target, ast.Name) and target.id.isupper():
+                    found.append((target.id, node.lineno, node.end_lineno or node.lineno))
+    return found
+
+
+def definitions(f):
+    """Return [(name, start, end)] 1-based inclusive spans, cached by path and hash.
+
+    Python spans come from the AST. Other languages (and unparsable Python) use
+    line patterns; a span then ends before the next definition, at most 40 lines.
+    """
+    key = (f["path"], f["sha256"])
+    if key not in _SYMBOL_CACHE:
+        suffix, text = Path(f["path"]).suffix.lower(), f["text"]
+        found = _python_definitions(text) if suffix == ".py" else None
+        if found is None:
+            patterns = ([r"^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)"] if suffix == ".py" else
+                        next((v for k, v in DEFINITION_PATTERNS.items() if suffix in k), []))
+            starts = sorted({(text.count("\n", 0, m.start()) + 1, m.group(1))
+                             for pattern in patterns for m in re.finditer("(?m)" + pattern, text)
+                             if m.group(1) not in _C_KEYWORDS})
+            total = text.count("\n") + 1
+            found = [(name, line, min(total, line + 39, *(s - 1 for s, _ in starts if s > line)))
+                     for line, name in starts]
+        if len(_SYMBOL_CACHE) > 20000:
+            _SYMBOL_CACHE.clear()
+        _SYMBOL_CACHE[key] = found[:2000]
+    return _SYMBOL_CACHE[key]
+
+
+def imports(f, known):
+    """Resolve local import edges to scanned paths. External packages are ignored."""
+    rel, text = f["path"], f["text"]
+    suffix, folder = Path(rel).suffix.lower(), posixpath.dirname(rel)
+
+    def first(*candidates):
+        return next((c for c in (posixpath.normpath(x) for x in candidates) if c in known and c != rel), None)
+
+    found = set()
+    if suffix == ".py":
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError, RecursionError):
+            return found
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                base = folder
+                for _ in range(max(0, node.level - 1)):
+                    base = posixpath.dirname(base)
+                module = (node.module or "").replace(".", "/")
+                roots = [base] if node.level else ["", "src"]
+                for r in roots:
+                    stem = posixpath.join(r, module) if module else r
+                    hit = first(stem + ".py", posixpath.join(stem, "__init__.py")) if module else None
+                    if hit:
+                        found.add(hit)
+                    for alias in node.names:
+                        sub = first(posixpath.join(stem, alias.name + ".py"))
+                        if sub:
+                            found.add(sub)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    stem = alias.name.replace(".", "/")
+                    hit = first(stem + ".py", stem + "/__init__.py", "src/" + stem + ".py", "src/" + stem + "/__init__.py")
+                    if hit:
+                        found.add(hit)
+    elif suffix in {".js", ".jsx", ".ts", ".tsx"}:
+        for spec in re.findall(r"""(?:from\s+|require\(\s*|import\(\s*|import\s+)['"](\.{1,2}/[^'"]+)['"]""", text):
+            stem = posixpath.join(folder, spec)
+            hit = first(stem, *(stem + e for e in (".ts", ".tsx", ".js", ".jsx")),
+                        *(stem + "/index" + e for e in (".ts", ".tsx", ".js", ".jsx")))
+            if hit:
+                found.add(hit)
+    elif suffix in {".c", ".cc", ".cpp", ".h", ".hpp"}:
+        for spec in re.findall(r'(?m)^\s*#\s*include\s+"([^"]+)"', text):
+            hit = first(posixpath.join(folder, spec), spec, "include/" + spec, "src/" + spec)
+            if not hit:
+                matches = [k for k in known if k.endswith("/" + spec)]
+                hit = matches[0] if len(matches) == 1 else None
+            if hit:
+                found.add(hit)
+    return found
+
+
+def goal_identifiers(goal):
+    """Lower-case goal identifiers mapped to whether they look like code names."""
+    result = {}
+    for raw in re.findall(r"`?[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*`?", goal):
+        quoted, token = raw.startswith("`"), raw.strip("`")
+        codey = quoted or "_" in token or "." in token or bool(re.search(r"[a-z][A-Z]", token))
+        for name in {token, *token.split(".")}:
+            low = name.lower()
+            if len(low) >= 3 and low not in STOPWORDS:
+                result[low] = result.get(low, False) or codey
+    return result
+
+
+def goal_symbol_spans(f, goal):
+    """(start, end) spans of definitions in this file whose names appear in the goal."""
+    wanted = goal_identifiers(goal)
+    return sorted({(start, end) for name, start, end in definitions(f) if name.lower() in wanted})
+
+
 def rank_files(scan, goal, includes=()):
     words = terms(goal)
-    ranked = []
+    wanted = goal_identifiers(goal)
+    exact = set(re.findall(r"[A-Za-z_]\w*", goal))
+    by_path = {f["path"]: f for f in scan["files"]}
+    defined = {}
+    for f in scan["files"]:
+        for name, *_ in definitions(f):
+            if name.lower() in wanted:
+                defined.setdefault(name.lower(), set()).add(f["path"])
+    scored = {}
     for f in scan["files"]:
         p = f["path"]
         name = p.lower()
@@ -202,17 +352,60 @@ def rank_files(scan, goal, includes=()):
         if matches:
             score += matches
             reasons.append("content matches task terms")
+        # A definition of a named symbol is stronger evidence than a mention of it.
+        hits = sorted({n for n, *_ in definitions(f) if n.lower() in defined and p in defined[n.lower()]})
+        bonus, strong, weak = 0, [], []
+        for symbol in hits:
+            owners = len(defined[symbol.lower()])
+            # Plain English words ("check", "run") often collide with method names; an
+            # exact-case capitalized match ("Ollama" -> class Ollama) is a code name.
+            if wanted[symbol.lower()] or (symbol[:1].isupper() and symbol in exact):
+                bonus += 40 if owners <= 3 else 15
+                strong.append(symbol)
+            elif owners == 1:
+                bonus += 4
+                weak.append(symbol)
+        if bonus:
+            score += min(80, bonus)
+            if strong:
+                reasons.append("defines: " + ", ".join(strong[:5]))
+            if weak:
+                reasons.append("defines common word: " + ", ".join(weak[:5]))
         if Path(p).name.lower().startswith("readme"):
             score += 8
             reasons.append("project overview")
         if Path(p).name in {"pyproject.toml", "package.json", "CMakeLists.txt", "Cargo.toml", "Makefile"}:
             score += 5
             reasons.append("build/package manifest")
+        scored[p] = [score, reasons]
+    # One import hop from the strongest code matches. Widely imported modules get a
+    # smaller boost because an edge to them says little about this particular task.
+    known = set(by_path)
+    graph = {p: imports(by_path[p], known) for p in known if Path(p).suffix.lower() in
+             {".py", ".js", ".jsx", ".ts", ".tsx", ".c", ".cc", ".cpp", ".h", ".hpp"}}
+    indegree = Counter(dep for deps in graph.values() for dep in deps)
+    seeds = sorted((p for p in graph if scored[p][0] >= 12), key=lambda p: (-scored[p][0], p))[:3]
+    boosts = {}
+    for seed in seeds:
+        base = min(15, max(3, scored[seed][0] // 4))
+        neighbours = [(dep, dep, "imported by " + seed) for dep in graph[seed]]
+        neighbours += [(src, seed, "imports " + seed) for src, deps in graph.items() if seed in deps]
+        for target, imported, reason in neighbours:
+            if target in seeds:
+                continue
+            value = max(1, int(base / (1 + math.log2(1 + indegree[imported]))))
+            if value > boosts.get(target, (0, ""))[0]:
+                boosts[target] = (value, reason)
+    for target, (value, reason) in boosts.items():
+        scored[target][0] += value
+        scored[target][1].append(reason)
+    ranked = []
+    for p, (score, reasons) in scored.items():
         if p in includes:
             score += 10000
             reasons.insert(0, "explicitly included")
         if score:
-            ranked.append((score, p, reasons, f))
+            ranked.append((score, p, reasons, by_path[p]))
     return sorted(ranked, key=lambda x: (-x[0], x[1]))
 
 

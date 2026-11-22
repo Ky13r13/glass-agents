@@ -81,3 +81,20 @@ New coverage includes:
 - Concurrent first-time SQLite initialization, including a reproduced startup WAL race now serialized.
 
 The actual SDK API was used for options and MCP server/tool construction; an offline client fixture exercised the bridge without calling a model. Scripted demos use real command/file evidence with synthetic agent decisions and are labeled accordingly. Authenticated live SDK/Codex/OpenCode sessions, real project-specific backtests, financial outcomes and visual browser operation were not tested.
+
+## Swarm workflows and single-agent tasks
+
+Checked on 2026-11-22 with Python 3.14.7 and Git 2.55.0. The full suite has **112 tests**: the 93 previous tests (including the uncommitted retrieval tests present in the working tree), plus 19 in `tests/test_swarm.py`.
+
+New coverage includes:
+
+- A baseline built from uncommitted and untracked files, without changing the user's index, HEAD or files. This works in repositories with and without commits. A non-Git project gets an actionable error.
+- Candidates writing different contents to the same file at the same time without interfering with each other. Candidate concurrency is bounded by `max_parallel` (measured peak overlap of 1 and 4).
+- Candidates with failing checks are excluded from critic review and cannot be accepted, even when critics would accept them.
+- Later rounds carry the leader's diff, critic feedback and operator messages. `adopt_leader` resets worktrees. Ties keep the incumbent leader.
+- Git-level scope enforcement drops a candidate that wrote a binary file the text scanner does not see.
+- The shared cost limit stops the whole swarm.
+- Integration refuses a changed checkout and refuses unaccepted candidates without `--allow-unaccepted`. It applies at most once and records only the reruns on the real checkout as verification evidence.
+- Single-agent `ask`: permissions can only narrow (including writing peers), there is no reviewer call, checks gate `completed`, out-of-folder writes are refused, and a native Codex agent runs read-only through the managed runner.
+
+All agent decisions in these tests are scripted drivers or the fake Codex fixture. Git operations, worktrees, check subprocesses and patch application are real. No hosted model, authenticated SDK/Codex/OpenCode session or local Ollama model was used. These results say nothing about how well real models converge, what swarms cost, or how fast they run.

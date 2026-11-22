@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 from .agent_config import starter_config
@@ -29,6 +30,44 @@ def initialize_demo(root):
     config["workflows"]["default"]["required_checks"] = ["check"]
     write_json(root / ".agentctl/agents.json", config)
     return root
+
+
+def initialize_swarm_demo(root):
+    """Three scripted candidates in separate Git worktrees and one scripted critic; no model calls."""
+    root = initialize_demo(root)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    config = starter_config()
+    writer = {"backend": "claude-sdk", "write_scope": ["note.txt"], "peers": [], "project_tools": []}
+    config["agents"] = {
+        "alpha": {**writer, "instructions": "Scripted candidate fixture."},
+        "beta": {**writer, "instructions": "Scripted candidate fixture."},
+        "gamma": {**writer, "instructions": "Scripted candidate fixture."},
+        "judge": {"backend": "claude-sdk", "write_scope": [], "peers": [], "project_tools": [],
+                  "instructions": "Scripted critic fixture."},
+    }
+    config["tools"]["check"] = {"argv": [sys.executable, "check.py"], "format": "json",
+                               "description": "Check the demo note for the required marker.",
+                               "input_schema": {"type": "object", "additionalProperties": False}}
+    config["workflows"] = {"default": {"type": "swarm", "candidates": ["alpha", "beta", "gamma"], "critics": ["judge"],
+                                       "required_checks": ["check"], "max_rounds": 3, "stable_rounds": 2,
+                                       "apply_winner": True, "max_agent_calls": 20, "timeout_seconds": 300}}
+    write_json(root / ".agentctl/agents.json", config)
+    return root
+
+
+async def swarm_demo_driver(runtime, actor, prompt, stack, reviewer):
+    runtime.emit("agent.message", actor, text="Synthetic swarm fixture; this is an offline controller demonstration.")
+    if reviewer:
+        text = (await runtime.tool(actor, "read_file", {"path": "note.txt"}, stack))["text"]
+        verified, concise = "verified" in text, "concise" in text
+        return {"decision": "accept" if verified else "revise", "score": 9 if verified and concise else 6 if verified else 2,
+                "feedback": "Meets the goal." if verified and concise else
+                            "Correct marker, but the note should also say it is concise." if verified else
+                            "The note lacks the verified marker."}
+    first = "Your task: Round 1." in prompt
+    content = ("draft\n" if actor == "alpha" else "verified\n") if first else "verified concise\n"
+    await runtime.tool(actor, "write_file", {"path": "note.txt", "content": content}, stack)
+    return {"summary": f"{actor} wrote {content.strip()!r} to note.txt.", "artifacts": ["note.txt"]}
 
 
 async def demo_driver(runtime, actor, prompt, stack, reviewer):

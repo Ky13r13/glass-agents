@@ -17,13 +17,21 @@ async def run(request, stop):
     def emit(event):
         print(json.dumps(event, ensure_ascii=False), flush=True)
     driver = None
-    if request.get("demo"):
+    if request.get("demo") == "swarm":
+        from .feedback_demo import swarm_demo_driver
+        driver = swarm_demo_driver
+    elif request.get("demo"):
         from .feedback_demo import demo_driver
         driver = demo_driver
-    runtime = AgentRuntime(Path(request["root"]), request["config"], Path(request["folder"]),
-                           validate_config(request["agents"]), request["workflow"], request["goal"],
-                           request["context"], stop, emit, driver)
-    state = await runtime.run()
+    agents = validate_config(request["agents"])
+    kind = agents["workflows"][request["workflow"]]["type"]
+    factory = AgentRuntime
+    if kind == "swarm":
+        from .swarm import SwarmRuntime
+        factory = SwarmRuntime
+    runtime = factory(Path(request["root"]), request["config"], Path(request["folder"]), agents,
+                      request["workflow"], request["goal"], request["context"], stop, emit, driver)
+    state = await (runtime.run_single() if kind == "single" else runtime.run())
     if state["status"] in {"failed", "cancelled"}:
         emit({"type": "turn.failed", "error": state.get("error") or state["status"]})
         return 1

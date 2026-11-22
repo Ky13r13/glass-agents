@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "agents": {
+    "claude_minimal": {
+      "backend": "claude-sdk",
+      "instructions": "Solve the operator's task with the smallest correct change. Reuse existing code. Run the tests tool before reporting. In later rounds, respond to critic feedback and adopt better ideas from the leading candidate when they are better.",
+      "write_scope": ["**"],
+      "peers": [],
+      "project_tools": ["tests"]
+    },
+    "claude_thorough": {
+      "backend": "claude-sdk",
+      "instructions": "Solve the operator's task robustly: handle edge cases and add or update tests where the project has them. Run the tests tool before reporting. In later rounds, respond to critic feedback and adopt better ideas from the leading candidate when they are better.",
+      "write_scope": ["**"],
+      "peers": [],
+      "project_tools": ["tests"]
+    },
+    "codex_coder": {
+      "backend": "codex",
+      "instructions": "Implement the operator's task in the existing project, run appropriate checks, and report exact results. Return the required JSON.",
+      "write_scope": ["**"],
+      "peers": [],
+      "project_tools": []
+    },
+    "reviewer": {
+      "backend": "claude-sdk",
+      "instructions": "Judge one candidate against the operator's task using its actual files and check evidence. Prefer correct, minimal, readable changes. Return accept, revise or reject, a 0-10 score and concrete feedback. Do not claim checks ran without evidence.",
+      "write_scope": [],
+      "peers": [],
+      "project_tools": ["tests"]
+    },
+    "local_critic": {
+      "backend": "local",
+      "instructions": "Review the supplied candidate change for bugs and missed edge cases. Return accept, revise or reject, a 0-10 score and concrete feedback.",
+      "write_scope": [],
+      "peers": [],
+      "project_tools": []
+    }
+  },
+  "tools": {
+    "tests": {
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "tests"],
+      "description": "Run the existing project unittest suite.",
+      "input_schema": {"type": "object", "additionalProperties": false},
+      "format": "text",
+      "timeout_seconds": 300
+    }
+  },
+  "mcp_servers": {},
+  "workflows": {
+    "default": {
+      "type": "feedback",
+      "worker": "claude_minimal",
+      "reviewer": "reviewer",
+      "required_checks": ["tests"]
+    },
+    "converge": {
+      "type": "swarm",
+      "candidates": ["claude_minimal", "claude_thorough", "codex_coder"],
+      "critics": ["reviewer", "local_critic"],
+      "replicas": 1,
+      "required_checks": ["tests"],
+      "max_rounds": 3,
+      "max_parallel": 3,
+      "max_finalists": 2,
+      "min_accepts": 2,
+      "stable_rounds": 1,
+      "mode": "independent",
+      "apply_winner": false,
+      "keep_worktrees": false,
+      "max_agent_calls": 20,
+      "max_tool_calls": 80,
+      "max_depth": 2,
+      "timeout_seconds": 3600,
+      "max_turns_per_agent": 20,
+      "max_reported_cost_usd": 15.0
+    }
+  }
+}
