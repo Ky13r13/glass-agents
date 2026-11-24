@@ -4,82 +4,98 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="agentctl-token" content="__AGENTCTL_TOKEN__">
-  <title>agentctl · Agent workspace</title>
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f7f7f4">
+  <title>Glass · Agent workspace</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
+  <script defer src="/portraits.js"></script>
   <script defer src="/app.js"></script>
 </head>
 <body>
-<div class="shell">
-  <aside class="sidebar">
-    <a class="brand" href="/" aria-label="agentctl home"><span class="brand-mark">a<span>_</span></span><strong>agentctl<span class="version">0.4</span></strong></a>
-    <div class="workspace-label">WORKSPACE</div>
-    <button class="project-switch" id="project-info"><span class="folder-icon">⌑</span><span><strong id="project-name">Loading workspace</strong><small>Local project</small></span><span class="chevron">⌄</span></button>
-    <nav aria-label="Main navigation">
-      <button class="nav-button active" data-view="agents"><span>◫</span> Agent workspace <span class="nav-count" id="agent-count">0</span></button>
-      <button class="nav-button" data-view="connections"><span>⌘</span> Connections <span id="connection-dot"></span></button>
-      <button class="nav-button" data-view="history"><span>◷</span> Run history</button>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="runtime-state"><span class="pulse-dot" id="server-dot"></span><span id="server-state">Connecting to dashboard</span></div>
-      <small>Runs on your machine.<br>Uses your installed agent CLIs.</small>
-      <div class="sidebar-footer"><span>agentctl / local</span><span id="clock">—</span></div>
-    </div>
-  </aside>
-  <main>
-    <header class="topbar"><div class="breadcrumbs">Workspace <span>/</span> <strong id="breadcrumb">Agent workspace</strong></div><div class="topbar-right"><span class="local-pill"><i></i> LOCAL SESSION</span><button id="refresh" class="icon-button" title="Refresh workspace" aria-label="Refresh workspace">↻</button></div></header>
-    <div id="demo-banner" class="demo-banner" hidden>DEMO WORKSPACE <span>Synthetic CLI activity. No models, market data, or trading accounts are connected.</span></div>
-    <div class="content">
-      <section id="view-agents" class="view">
-        <div class="page-heading"><div><div class="eyebrow">YOUR AGENT CONTROL ROOM</div><h1>Agent workspace<span class="heading-dot">.</span></h1><p>Give each agent a task. See the work as it happens.</p></div><button class="button primary" id="new-agent"><span>＋</span> New agent <kbd>N</kbd></button></div>
-        <div class="stats">
-          <div class="stat"><span class="stat-icon green">◉</span><div><span class="stat-label">Active agents</span><strong id="stat-active">0</strong></div><small id="worker-cap">2 available slots</small></div>
-          <div class="stat"><span class="stat-icon amber">◷</span><div><span class="stat-label">In queue</span><strong id="stat-queued">0</strong></div><small>Waiting to start</small></div>
-          <div class="stat"><span class="stat-icon blue">✓</span><div><span class="stat-label">Completed runs</span><strong id="stat-complete">0</strong></div><small>CLI execution completed</small></div>
-          <div class="stat"><span class="stat-icon purple">⌘</span><div><span class="stat-label">CLI connections</span><strong id="stat-connections">0<span>/2</span></strong></div><small>Executables detected</small></div>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Glass home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Glass</a>
+  <button class="project-switch" id="project-info" title="Inspect workspace"><span id="project-name">Loading…</span></button>
+  <nav class="nav" aria-label="Main navigation">
+    <button class="nav-button active" data-view="agents">Agents <span class="nav-count" id="agent-count">0</span></button>
+    <button class="nav-button" data-view="connections">Connections</button>
+    <button class="nav-button" data-view="history">History</button>
+  </nav>
+  <div class="topbar-right">
+    <span class="live-counts" id="live-counts">—</span>
+    <span class="server-state" title="Dashboard connection"><i class="pulse-dot" id="server-dot"></i><span id="server-state">Connecting</span></span>
+    <button class="button primary" id="new-agent" title="New agent (N)">＋ New agent</button>
+  </div>
+</header>
+<div id="demo-banner" class="demo-banner" hidden>Demo workspace · synthetic activity, no models connected</div>
+<main class="content">
+  <section id="view-agents" class="view">
+    <h1 class="sr-only">Agent workspace</h1>
+    <div class="workspace-grid">
+      <aside class="panel agents-panel" aria-label="Runs">
+        <h2>Runs</h2>
+        <div class="filter-row" role="group" aria-label="Filter agents">
+          <button class="filter active" data-filter="all">All</button><button class="filter" data-filter="active">Running</button><button class="filter" data-filter="queued">Queued</button><button class="filter" data-filter="finished">Done</button>
         </div>
-        <div class="workspace-grid">
-          <section class="panel agents-panel">
-            <div class="panel-heading"><h2>Agents <span id="list-count" class="count-pill">0</span></h2><button class="text-button" id="show-all">All activity</button></div>
-            <div class="filter-row" role="group" aria-label="Filter agents"><button class="filter active" data-filter="all">All</button><button class="filter" data-filter="active">Active</button><button class="filter" data-filter="queued">Queued</button><button class="filter" data-filter="finished">Finished</button></div>
-            <div id="agent-list" class="agent-list"></div>
-            <div class="queue-note"><span>⇄</span><p>Readers can run together. Tasks that can write run exclusively in this workspace.</p></div>
-          </section>
-          <section class="panel activity-panel">
-            <div id="selection-empty" class="selection-empty"><div class="empty-orbit">⌘</div><h2>Your next idea starts here</h2><p>Launch an agent with Codex or OpenCode.<br>Its activity, connections, and results appear here.</p><button class="button secondary" id="empty-launch">＋ Create your first agent</button><div class="empty-hint"><span>01 &nbsp; Choose a CLI</span><span>02 &nbsp; Set a task</span><span>03 &nbsp; Follow the work</span></div></div>
-            <div id="selection-detail" hidden>
-              <div class="detail-heading"><div class="detail-title"><span class="agent-avatar" id="detail-avatar">A</span><div><h2 id="detail-name">Agent</h2><div id="detail-subtitle" class="muted"></div></div></div><div class="detail-actions"><span id="detail-status" class="status"></span><button class="button danger small" id="stop-agent">Stop</button><button class="button secondary small" id="repeat-agent">Run again</button></div></div>
-              <div class="route-strip" id="route-strip"></div>
-              <div class="tabs" role="tablist"><button role="tab" aria-selected="true" class="tab active" data-tab="activity">Live activity <i class="tiny-dot"></i></button><button role="tab" aria-selected="false" class="tab" data-tab="team">Managed team</button><button role="tab" aria-selected="false" class="tab" data-tab="connections">Connections</button><button role="tab" aria-selected="false" class="tab" data-tab="results">Results &amp; files</button></div>
-              <div id="tab-activity" class="tab-content">
-                <div class="activity-toolbar"><span><span class="tiny-dot"></span> <span id="stream-label">Waiting for events</span></span><label><input type="checkbox" id="autoscroll" checked> Auto-scroll</label></div>
-                <div id="activity-feed" class="activity-feed" aria-live="polite"></div>
-                <div class="followup"><label for="followup-text" id="followup-label">NEXT INSTRUCTION</label><form id="followup-form"><textarea id="followup-text" rows="2" placeholder="Ask a follow-up when this task finishes…" required></textarea><select id="message-recipient" aria-label="Message recipient" hidden></select><button class="send-button" id="followup-send" title="Send instruction" aria-label="Send instruction">↑</button></form><small id="followup-hint">Follow-ups start a fresh task with the previous result as context.</small></div>
-              </div>
-              <div id="tab-connections" class="tab-content" hidden></div>
-              <div id="tab-team" class="tab-content" hidden></div>
-              <div id="tab-results" class="tab-content" hidden></div>
+        <div id="agent-list" class="agent-list"></div>
+      </aside>
+      <section class="detail">
+        <div id="selection-empty" class="panel selection-empty">
+          <svg class="empty-graphic" viewBox="0 0 220 90" aria-hidden="true"><defs><marker id="empty-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs><rect x="4" y="30" width="54" height="30" rx="9"/><rect x="83" y="30" width="54" height="30" rx="9"/><rect x="162" y="8" width="54" height="30" rx="9"/><rect x="162" y="52" width="54" height="30" rx="9"/><path class="empty-edge" d="M58,45 L81,45" marker-end="url(#empty-arrow)"/><path class="empty-edge" d="M137,45 C150,45 148,23 160,23" marker-end="url(#empty-arrow)"/><path class="empty-edge" d="M137,45 C150,45 148,67 160,67" marker-end="url(#empty-arrow)"/></svg>
+          <h2>No agent selected</h2>
+          <p>Start an agent and watch, live, who it talks to.</p>
+          <button class="button primary" id="empty-launch">＋ New agent</button>
+        </div>
+        <div id="selection-detail" hidden>
+          <div class="detail-heading">
+            <div class="detail-title"><span class="agent-avatar" id="detail-avatar" aria-hidden="true"></span><div><h2 id="detail-name">Agent</h2><div id="detail-subtitle" class="muted"></div></div></div>
+            <div class="detail-actions"><span id="detail-status" class="status"></span><button class="button danger small" id="stop-agent">Stop</button><button class="button secondary small" id="repeat-agent">Run again</button></div>
+          </div>
+          <div class="panel flow-panel">
+            <div class="flow-head">
+              <h3>Communication map</h3>
+              <div class="flow-legend" aria-label="Arrow types"><span class="lg task">task</span><span class="lg result">result</span><span class="lg message">message</span><span class="lg review">review</span><span class="lg tool">tool</span><span class="lg model">model / network</span></div>
             </div>
-          </section>
+            <div id="flow-map" class="flow-map" role="group" aria-label="Agent communication map"></div>
+            <div class="flow-foot"><span id="flow-caption" class="muted"></span></div>
+            <section id="flow-focus" class="agent-inspector" aria-label="Selected agent" hidden>
+              <div id="inspector-portrait" aria-hidden="true"></div>
+              <div class="inspector-info"><strong id="flow-focus-name"></strong><span id="inspector-meta"></span><p id="inspector-task"></p></div>
+              <div class="inspector-actions"><button class="button secondary small" id="inspector-message" type="button" hidden>Write message</button><button class="text-button" id="flow-clear" type="button">Show all activity</button></div>
+            </section>
+          </div>
+          <div class="tabs" role="tablist"><button role="tab" aria-selected="true" class="tab active" data-tab="activity">Activity</button><button role="tab" aria-selected="false" class="tab" data-tab="results">Results</button><button role="tab" aria-selected="false" class="tab" data-tab="details">Details</button></div>
+          <div id="tab-activity" class="tab-content">
+            <div class="activity-toolbar"><span id="stream-label" class="muted">Waiting for events</span><label><input type="checkbox" id="autoscroll" checked> Follow</label></div>
+            <div id="activity-feed" class="activity-feed" aria-live="polite"></div>
+            <form id="followup-form" class="followup"><select id="message-recipient" aria-label="Message recipient" hidden></select><textarea id="followup-text" rows="1" placeholder="Follow-up instruction…" required aria-labelledby="followup-hint"></textarea><button class="send-button" id="followup-send" title="Send" aria-label="Send">↑</button></form>
+            <small id="followup-hint" class="muted"></small>
+          </div>
+          <div id="tab-results" class="tab-content" hidden></div>
+          <div id="tab-details" class="tab-content" hidden><div id="details-team"></div><div id="details-connections"></div></div>
         </div>
-        <div class="bottom-note"><span>◈</span> Your workspace, your tools.<span class="bottom-note-right">Provider completion and verification are tracked separately.</span></div>
       </section>
-      <section id="view-connections" class="view" hidden><div class="page-heading"><div><div class="eyebrow">BRING YOUR OWN RUNTIME</div><h1>Connections<span class="heading-dot">.</span></h1><p>Point agentctl at the tools you already use.</p></div></div><div id="connections-content"></div></section>
-      <section id="view-history" class="view" hidden><div class="page-heading"><div><div class="eyebrow">A RECORD OF THE WORK</div><h1>Run history<span class="heading-dot">.</span></h1><p>Revisit tasks, reported results, and execution evidence.</p></div></div><div id="history-content" class="panel"></div></section>
     </div>
-  </main>
-</div>
+  </section>
+  <section id="view-connections" class="view" hidden><h1 class="page-title">Connections</h1><div id="connections-content"></div></section>
+  <section id="view-history" class="view" hidden><h1 class="page-title">History</h1><div id="history-content" class="panel"></div></section>
+</main>
 <dialog id="launch-dialog">
   <form id="launch-form">
-    <div class="modal-heading"><div><div class="eyebrow">MAKE ROOM FOR THE NEXT IDEA</div><h2>Launch an agent</h2></div><button type="button" class="icon-button" data-close="launch-dialog" aria-label="Close">×</button></div>
+    <div class="modal-heading"><h2>New agent</h2><button type="button" class="icon-button" data-close="launch-dialog" aria-label="Close">×</button></div>
+    <label class="field">Task<textarea id="launch-goal" rows="4" placeholder="What should it do, and what result do you expect?" maxlength="12000" required></textarea></label>
+    <div class="form-grid">
+      <label class="field">Runtime<select id="launch-backend"><option value="codex">Codex</option><option value="opencode">OpenCode</option><option value="claude-sdk">Managed agents (agents.json)</option><option value="local">Ollama analyst</option><option value="codex-local">Codex + Ollama (experimental)</option></select></label>
+      <label class="field">Access<select id="launch-permission"><option value="read-only">Read-only</option><option value="workspace-write">Can write · exclusive</option></select></label>
+    </div>
     <label class="field">Workflow<select id="launch-workflow"><option value="">Single agent</option></select></label>
-    <label class="field">Agent name<input id="launch-name" placeholder="e.g. Strategy researcher" maxlength="100"></label>
-    <label class="field">Task<textarea id="launch-goal" rows="4" placeholder="Describe the goal, the inputs it should use, and the result you expect…" maxlength="12000" required></textarea></label>
-    <div class="form-grid"><label class="field">Agent runtime<select id="launch-backend"><option value="codex">Codex</option><option value="opencode">OpenCode</option><option value="claude-sdk">Managed feedback / Claude SDK</option><option value="local">Ollama analyst</option><option value="codex-local">Codex + Ollama (experimental)</option></select></label><label class="field">Access<select id="launch-permission"><option value="read-only">Read-only sandbox</option><option value="workspace-write">Workspace write · exclusive</option></select></label></div>
-    <label class="field">Model <span class="optional">optional · uses CLI default</span><input id="launch-model" placeholder="OpenCode: provider/model · Codex: model name" maxlength="200"></label>
-    <label class="field">Include files <span class="optional">optional · one relative path per line</span><textarea id="launch-includes" rows="2" placeholder="strategies.py&#10;docs/backtesting.md"></textarea></label>
-    <p id="launch-note" class="form-note">The context packet is prepared when the task starts. Existing CLI authentication is reused.</p>
-    <div class="modal-footer"><button type="button" class="button secondary" data-close="launch-dialog">Cancel</button><button class="button primary" id="launch-submit">Launch agent ↗</button></div>
+    <details class="advanced"><summary>Advanced</summary>
+      <label class="field">Name <span class="optional">optional</span><input id="launch-name" placeholder="e.g. CSV fixer" maxlength="100"></label>
+      <label class="field">Model <span class="optional">optional · CLI default</span><input id="launch-model" placeholder="OpenCode: provider/model · Codex: model name" maxlength="200"></label>
+      <label class="field">Include files <span class="optional">one relative path per line</span><textarea id="launch-includes" rows="2" placeholder="src/export.py"></textarea></label>
+    </details>
+    <p id="launch-note" class="form-note"></p>
+    <div class="modal-footer"><button type="button" class="button secondary" data-close="launch-dialog">Cancel</button><button class="button primary" id="launch-submit">Launch</button></div>
   </form>
 </dialog>
 <dialog id="artifact-dialog"><div class="modal-heading"><h2 id="artifact-title">Artifact</h2><button class="icon-button" data-close="artifact-dialog" aria-label="Close">×</button></div><pre id="artifact-text"></pre></dialog>

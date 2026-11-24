@@ -81,7 +81,10 @@ def doctor(cfg):
                 except ValueError:
                     continue
                 result["gpus"].append(card)
-                if "1080" in card["name"]:
+                if "1050" in card["name"]:
+                    result["notes"].append("GTX 1050 Ti: start with one Q4 3B model and 4096 context; 4 GB VRAM leaves little room for a 7B model or large context.")
+                    result["notes"].append("Use `ollama ps` after a request to confirm GPU placement; CPU offloading can work but will be slower.")
+                elif "1080" in card["name"]:
                     result["notes"].append("1080 Ti: start with one Q4 7B model and 8192 context; measure memory and latency before increasing either.")
                     try:
                         if int(card["driver"].split(".")[0]) < 570:

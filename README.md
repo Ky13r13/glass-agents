@@ -1,6 +1,56 @@
-# agentctl 0.4.0
+# Glass agents
 
-A local agent dashboard and Linux CLI for **Claude Agent SDK, Codex, OpenCode, and Ollama**. Attach agent definitions to any project, run bounded worker/reviewer feedback loops, delegate to named peers, and watch results in the dashboard. Requires **Python 3.11+ on Linux or WSL**. The original CLI/dashboard is standard-library only; the managed SDK runtime is an optional extra.
+Glass is a local agent dashboard for **Claude Agent SDK, Codex, OpenCode, and Ollama**. Its Linux CLI is `agentctl`. Attach agent definitions to a project, delegate to named peers, and follow their messages on the communication map. The dashboard runs on Python 3.11+ on Linux or WSL. Managed agent workflows use optional dependencies.
+
+## Open the dashboard
+
+From the repository root, launch the dashboard from your current source files.
+
+~~~bash
+python3 -m agentctl dashboard --demo
+~~~
+
+The demo creates an isolated temporary project and clearly labeled synthetic CLI activity. It does not call a model or connect market data. Close the server with Ctrl+C.
+
+If you installed a standalone copy with `install.sh`, running plain `agentctl` uses the executable your shell finds on `PATH`. Check its location with `command -v agentctl`. That copy can keep showing an earlier dashboard after the source changes. Several builds report `0.4.0`, so use an explicit path when choosing a version.
+
+On the communication map, each agent appears as a glass droplet. Select one to follow its messages, see its current task, or address it during a live managed run.
+
+To use your actual project:
+
+~~~bash
+python3 -m agentctl -C /path/to/your/project init
+python3 -m agentctl -C /path/to/your/project dashboard
+~~~
+
+The dashboard opens at **http://127.0.0.1:8765**. In **Connections**, set the path to your existing Codex or OpenCode executable, then use **New agent** to choose a CLI, model, access mode, task, and optional input files. CLI authentication is reused from your terminal environment. **Check CLI** tests executable discovery/version, not provider authentication.
+
+Each task has live reported activity, configured provider/MCP metadata, sampled TCP connections while its process is active, output artifacts and verification evidence. Send a follow-up after a task finishes or stop it before redirecting the work. Follow-ups are fresh runs with the previous result as context. The dashboard manages the CLI processes it starts; existing interactive terminal sessions stay in their original terminals.
+
+Read-only Codex tasks can overlap, up to the configured worker limit. Writers and all OpenCode jobs run exclusively in the workspace. OpenCode uses its own tool permissions; it does not acquire the Codex OS sandbox. No auto-approval/bypass flags are added. Headless tool approval requests may fail or reach the configured timeout; use the CLI's own interactive terminal for approval conversations.
+
+Choose **backtest-research** in the workflow selector to design an experiment, call your existing backtester, and review actual results. It is a role template, not a replacement trading engine or a prebuilt QTE integration. Supply your actual entry point, data and fixed evaluation protocol. See [Dashboard guide](docs/DASHBOARD.md) for the input/output contract and detailed usage.
+
+## Launch an older dashboard
+
+These standalone launchers are preserved in this workspace’s Git-ignored `dist/` directory. Run one command from the repository root. Each demo opens its own temporary project, and the separate ports let you compare versions side by side.
+
+| Dashboard | Launch command |
+|---|---|
+| Original light dashboard, base CLI (`ba44a01`) | `./dist/agentctl-base dashboard --demo --port 8769` |
+| Same light dashboard, with swarm support (`36af852`) | `./dist/agentctl-classic dashboard --demo --port 8768` |
+| Dark communication map | `./dist/agentctl-map dashboard --demo --port 8766` |
+| Dark map with animated pixel robots | `./dist/agentctl-robots dashboard --demo --port 8767` |
+
+The two dark designs were recovered from local development snapshots. Copy their launchers if you want those designs on another machine. For a committed version in a fresh clone, use a separate worktree. For example, the following launches the swarm build.
+
+~~~bash
+git worktree add --detach ../glass-agents-36af852 36af852
+cd ../glass-agents-36af852
+python3 -m agentctl dashboard --demo --port 8768
+~~~
+
+To preserve a future version, run `bash install.sh --output ./dist/agentctl-my-snapshot` from that version’s source and choose a distinct filename for each build.
 
 ## Add agents to any project
 
@@ -23,11 +73,28 @@ The controller runs **worker → command checks → reviewer → revision**, unt
 Talk to one agent directly, within limits you set:
 
 ~~~bash
-agentctl -C /path/to/your/project agents ask coder "Add CSV quoting" --in src/export
+agentctl -C /path/to/your/project agents ask worker "Add CSV quoting" --in src/export
 agentctl -C /path/to/your/project agents ask reviewer "Explain the import pipeline" --read-only
 ~~~
 
-Or let several agents (Claude SDK, Codex, OpenCode) solve the same task in parallel. Each works in its own Git worktree; read-only critics (including a local model) judge them, and feedback rounds repeat until one candidate passes the checks, is accepted and holds the lead:
+### Run a mixed-provider team
+
+In the mixed example, a Codex coder asks a Claude SDK advisor to inspect the code. Glass delivers the advisor's messages and result to the coder, then runs the configured Python checks and calls an independent reviewer. With the managed runtime installed and both providers authenticated, try the example from this repository.
+
+~~~bash
+python3 -m agentctl agents init
+python3 -m agentctl agents validate --config examples/agents-mixed.json
+python3 -m agentctl agents run "Trace how Glass records a failed project check" \
+  --config examples/agents-mixed.json --workflow codex-led
+~~~
+
+Each agent's `backend`, optional `model`, and `peers` list determine who runs each role and who can contact whom. Codex, OpenCode, Ollama, and Claude SDK agents can initiate peer requests. A message waits in the recipient's mailbox. A delegated task starts the recipient and returns its answer to the caller. Follow the exchange in the dashboard or with `agentctl agents events RUN_ID --follow`.
+
+To launch this team from the dashboard, add the example's agent, tool and workflow definitions to your project's `.agentctl/agents.json`, then select **Managed · codex-led** under Workflow.
+
+### Run a swarm
+
+Several agents (Claude SDK, Codex, OpenCode) can solve the same task in parallel. Each works in its own Git worktree; read-only critics (including a local model) judge them, and feedback rounds repeat until one candidate passes the checks, is accepted and holds the lead:
 
 ~~~bash
 cp examples/agents-swarm.json /path/to/your/project/.agentctl/agents.json
@@ -49,31 +116,6 @@ agentctl -C /path/to/your/project agents message RUN_ID --to worker --text "Focu
 ~~~
 
 See [Portable agent loop guide](docs/AGENT_LOOPS.md) for single-agent tasks, swarm configuration and integration, data flow, tool input/output contracts, mixed-backend delegation, limits and SDK setup.
-
-## Open the dashboard
-
-From the extracted source directory, preview the interface without connecting a model:
-
-~~~bash
-python3 -m agentctl dashboard --demo
-~~~
-
-The demo creates an isolated temporary project and clearly labeled synthetic CLI activity. It does not call a model or connect market data. Close the server with Ctrl+C.
-
-To use your actual project:
-
-~~~bash
-python3 -m agentctl -C /path/to/your/project init
-python3 -m agentctl -C /path/to/your/project dashboard
-~~~
-
-The dashboard opens at **http://127.0.0.1:8765**. In **Connections**, set the path to your existing Codex or OpenCode executable, then use **New agent** to choose a CLI, model, access mode, task, and optional input files. CLI authentication is reused from your terminal environment. **Check CLI** tests executable discovery/version, not provider authentication.
-
-Each task has live reported activity, configured provider/MCP metadata, sampled TCP connections while its process is active, output artifacts and verification evidence. Send a follow-up after a task finishes or stop it before redirecting the work. Follow-ups are fresh runs with the previous result as context. The dashboard manages the CLI processes it starts; existing interactive terminal sessions stay in their original terminals.
-
-Read-only Codex tasks can overlap, up to the configured worker limit. Writers and all OpenCode jobs run exclusively in the workspace. OpenCode uses its own tool permissions; it does not acquire the Codex OS sandbox. No auto-approval/bypass flags are added. Headless tool approval requests may fail or reach the configured timeout; use the CLI's own interactive terminal for approval conversations.
-
-Choose **backtest-research** in the workflow selector to design an experiment, call your existing backtester, and review actual results. It is a role template, not a replacement trading engine or a prebuilt QTE integration. Supply your actual entry point, data and fixed evaluation protocol. See [Dashboard guide](docs/DASHBOARD.md) for the input/output contract and detailed usage.
 
 ## Install
 
@@ -182,7 +224,7 @@ Secret-path filtering and text redaction are best-effort. Inspect a packet befor
 
 ## Local model setup
 
-The optional starting profile is `qwen2.5-coder:7b-instruct-q4_K_M`, an approximately 4.7 GB model download, with 8192 context and one local request at a time. This is a conservative candidate to benchmark on your hardware, not a claim that every workload fits or performs well.
+For a GTX 1050 Ti, the starting profile is `qwen2.5-coder:3b-instruct-q4_K_M`, with 4096 context and one local request at a time. A 1050 Ti commonly has 4 GB VRAM, so this profile is intentionally modest; benchmark it on your machine rather than assuming full GPU placement or good autonomous-coding performance.
 
 Follow [docs/LINUX_SETUP.md](docs/LINUX_SETUP.md) for driver/runtime setup, then:
 
@@ -204,7 +246,7 @@ cd /path/to/your/project
 agentctl start "Explain the CSV export logic and likely edge cases" --backend local
 ```
 
-`models setup` downloads the base model and creates `agentctl-helper:latest` with the configured context setting. `models benchmark` runs one structured code-reading smoke test and records measured generation speed. It does not certify code-editing or tool-use quality.
+`models setup` downloads the configured base model and creates `agentctl-helper:latest` with the configured context setting. `models benchmark` runs one structured code-reading smoke test and records measured generation speed. It does not certify code-editing or tool-use quality.
 
 `--backend local` is a bounded, read-only analyst using Ollama directly. It has no shell or edit tools. It can only analyze supplied excerpts, and its output length is bounded. Hosted Codex remains the default coding agent.
 
@@ -233,13 +275,13 @@ agentctl workflow run bugfix --goal "Fix the CSV quoting bug" --dry-run
 # Inspect the plan, then repeat without --dry-run.
 ```
 
-Eight built-in workflows cover bug fixes, code review, tests, documentation, release checks, client reports, BOM audits, and quote drafts. Each supplies explicit role contracts, dependencies, and review boundaries. Client deliverables get a unique output directory. `workflow export` saves an editable job graph without launching models.
+Nine built-in workflows cover backtesting research, bug fixes, code review, tests, documentation, release checks, client reports, BOM audits, and quote drafts. Each supplies explicit role contracts, dependencies, and review boundaries. Client deliverables get a unique output directory. `workflow export` saves an editable job graph without launching models.
 
 See [Workflow agents](docs/WORKFLOW_AGENTS.md) for commands and [Automation and revenue](docs/AUTOMATION_AND_REVENUE.md) for paid-service ideas, pilot economics, and optional Linux scheduling. No schedules or client delivery integrations are enabled automatically.
 
 ## Further documentation
 
-- [Linux and GTX 1080 Ti setup](docs/LINUX_SETUP.md)
+- [Linux and GTX 1050 Ti setup](docs/LINUX_SETUP.md)
 - [Architecture, data flow, and extension points](docs/ARCHITECTURE.md)
 - [Configuration and command reference](docs/REFERENCE.md)
 - [Implemented scope and roadmap](docs/ROADMAP.md)

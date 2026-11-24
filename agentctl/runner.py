@@ -105,7 +105,7 @@ def codex_command(cfg, root, output_path, permission, model=None, backend="codex
 
 
 def prepare_run(root, cfg, goal, backend="codex", permission="workspace-write", includes=(), budget=None,
-                carry="", extra="", parent=None, model=None, write_scope=None):
+                carry="", extra="", parent=None, model=None, write_scope=None, managed_contract=None):
     if backend == "opencode" and permission != "workspace-write":
         raise UserError("OpenCode runs use CLI-managed permissions and require workspace-write exclusive scheduling.")
     if backend == "claude-sdk" and permission != "workspace-write":
@@ -117,7 +117,7 @@ def prepare_run(root, cfg, goal, backend="codex", permission="workspace-write", 
     run_id = new_id()
     folder = state_dir(root) / "runs" / run_id
     folder.mkdir(parents=True, exist_ok=False)
-    manifest = build_packet(root, cfg, goal, folder, backend, includes, carry, extra, budget, permission)
+    manifest = build_packet(root, cfg, goal, folder, backend, includes, carry, extra, budget, permission, managed_contract)
     record = {"id": run_id, "created": now(), "goal": goal, "objective": goal, "backend": backend, "permission": permission,
               "model": model, "status": "prepared", "parent": parent, "folder": str(folder),
               "root": str(root), "includes": list(includes), "budget": budget,
@@ -235,6 +235,9 @@ def execute_run(root, cfg, record, stop=None, handoff=True, quiet=False, observe
             part = part if isinstance(part, dict) else {}
             if kind == "step_start":
                 seen_completed = False
+                if record.get("output_schema_file"):
+                    # Earlier tool steps can contain progress prose before the structured reply.
+                    last_message = ""
             elif kind == "text":
                 text = part.get("text", "")
                 if isinstance(text, str):
@@ -313,7 +316,10 @@ def execute_run(root, cfg, record, stop=None, handoff=True, quiet=False, observe
             input_path = request_path
         elif backend == "local":
             request_path = folder / "local-request.json"
-            write_json(request_path, {"config": cfg, "prompt": read_text(packet), "model": record["model"]})
+            request = {"config": cfg, "prompt": read_text(packet), "model": record["model"]}
+            if record.get("output_schema_file"):
+                request["schema"] = json.loads(read_text(schema))
+            write_json(request_path, request)
             cmd = [sys.executable, "-m", "agentctl.local_worker"]
             env = dict(os.environ)
             package_path = str(Path(__file__).parent.parent)

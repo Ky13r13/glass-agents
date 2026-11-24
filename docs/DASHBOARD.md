@@ -1,6 +1,33 @@
 # Agent dashboard
 
-Version 0.4 adds portable **Managed feedback** workflows and a **Managed team** inspector. Run agentctl agents init in your project, configure its roles/tools/checks, then select Managed feedback in the launch form. These workflows automatically pass structured review feedback into the next iteration. CLI-launched managed runs also appear for monitoring and addressed operator messages. Existing workflow templates below remain fixed job graphs. See [Portable agent loops](AGENT_LOOPS.md) for setup and exact behavior.
+Choose a run from the **Runs** list to open its communication map. On wide screens the list sits to the right of the map. **Activity**, **Results** and **Details** sit below the map. The top bar holds navigation, live counts and **New agent**.
+
+## Communication map
+
+Each agent appears as a glass droplet with eyes. The field backdrop and four droplet materials are rendered from Vitreum’s magnetic visualizer shaders and bundled for offline use. An agent keeps its material as its status changes. Running agents breathe and blink, completed agents close their eyes, and failed agents look worried. Move the pointer over a droplet to draw it gently toward you. Select it with a click, Enter or Space to see its status, model, recorded task and incoming peer messages. **Show all activity** clears the selection.
+
+During a live managed feedback run, **Write message** opens the composer addressed to the selected agent. Press Send to queue the message. Scroll the map to reach additional agents in larger teams. The dashboard respects the system's reduced-motion preference.
+
+Arrows run from the sender to the recipient.
+
+| Arrow | Meaning |
+|---|---|
+| task (olive) | You, the controller or a delegating agent handing work to an agent. Feedback revisions are drawn as tasks too. |
+| result (teal) | An agent's reply returning to whoever asked. |
+| message (plum) | A mailbox message from one agent to another. |
+| review (ochre) | A swarm candidate sent to a critic, or a reviewer's verdict going back to the controller. |
+| tool (grey) | File access, project commands such as tests, and MCP or CLI tools. |
+| model / network (dashed blue) | Calls to the model provider; for single CLI runs, live TCP connections sampled from the process. |
+
+How it behaves:
+
+- **Live traffic** travels along animated arrows. A star (★) marks the current swarm leader.
+- **After the run:** a finished run keeps every arrow. Tool and model arrows fade so the agent-to-agent paths stand out.
+- Hover over an arrow for its count and latest content.
+
+Arrows come only from recorded events: managed-agent events, CLI tool events and sampled sockets. They show reported activity, not a packet capture. Provider arrows show which backend an agent uses, not a verified network destination.
+
+Version 0.4 adds portable **Managed feedback** workflows. The managed team is drawn on the map and listed under **Details**. Run agentctl agents init in your project, configure its roles/tools/checks, then select Managed feedback in the launch form. These workflows automatically pass structured review feedback into the next iteration. CLI-launched managed runs also appear for monitoring and addressed operator messages. Existing workflow templates below remain fixed job graphs. See [Portable agent loops](AGENT_LOOPS.md) for setup and exact behavior.
 
 Version 0.3 extends the existing agentctl project with a local browser GUI. The underlying tools remain your installed Codex/OpenCode CLIs and optional Ollama server. There is no additional agent framework, hosted account or JavaScript build step to maintain.
 
@@ -27,7 +54,7 @@ Alternatively, run bash install.sh --replace, then use agentctl instead of pytho
 
 Log in to the CLI in your normal terminal first. In **Connections**, enter an executable name on PATH or an absolute executable path. Arguments and shell fragments do not belong in this field. The dashboard inherits the server process environment and reuses CLI authentication. It has no API-key entry form.
 
-**Save connection** stores the executable override for dashboard jobs. **Check CLI** invokes --version; a successful check confirms executable availability, not provider authentication or account quota.
+**Save** stores the executable override for dashboard jobs. **Check CLI** invokes --version; a successful check confirms executable availability, not provider authentication or account quota.
 
 The GUI supports Codex, OpenCode, a direct read-only Ollama analyst, and the existing experimental Codex/Ollama route. Direct local analysis has no tools.
 
@@ -72,7 +99,7 @@ The wrapper's context estimate remains heuristic. In particular, its startup gui
 
 ## Results and verification
 
-**Results & files** shows the agent's final reported answer, observed scanned-file changes, recorded usage, artifacts, and historical explicit checks. Open PACKET.md to inspect the actual input and answer.md for the saved output. Raw logs stay in the project's state directory; browser previews use best-effort redaction and are bounded.
+**Results** shows the agent's final reported answer, observed scanned-file changes, recorded usage, artifacts, and historical explicit checks. Open PACKET.md to inspect the actual input and answer.md for the saved output. Raw logs stay in the project's state directory; browser previews use best-effort redaction and are bounded.
 
 When the queue is idle, **Run check** executes a command you provide and records its exit status and source fingerprint. For example:
 
@@ -137,10 +164,10 @@ For optimization and experiment tracking, existing projects to integrate at the 
 
 ## Local state and HTTP boundary
 
-The dashboard reuses the existing SQLite run store and artifacts. Its small additions inside the project's state directory are dashboard-settings.json, dashboard-jobs.json and dashboard.lock. No schema migration is required for existing runs. Older terminal runs appear in **Run history**.
+The dashboard reuses the existing SQLite run store and artifacts. Its small additions inside the project's state directory are dashboard-settings.json, dashboard-jobs.json and dashboard.lock. No schema migration is required for existing runs. Older terminal runs appear in **History**.
 
 The HTTP API requires a random session token, checks Host/Origin, serves no cross-origin API, and confines artifact previews to a fixed allowlist. The dashboard is a trusted local application capable of launching your CLIs and explicit checks. Do not expose it as a public service.
 
 ## Validation limits
 
-Automated tests use local fixture CLIs. They cover the real subprocess, queue, HTTP, artifact and packaged-resource paths. Authenticated live Codex/OpenCode sessions and visual browser operation must be checked on the target machine; the cloud preview environment could not access the local server. No trading performance or financial outcome was measured.
+Automated tests use local fixture CLIs and cover the subprocess, queue, HTTP, artifact and packaged-resource paths. A Firefox browser check with synthetic activity exercised animated and resting portraits, keyboard selection, inbound messages, the addressed composer and reduced motion. It also exercised selection on a narrow screen with 13 agents. These checks used offline fixtures throughout.

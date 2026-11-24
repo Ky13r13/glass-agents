@@ -26,7 +26,7 @@ _store_init_guard = threading.Lock()
 
 DEFAULTS = {
     "context_budget": 6000,
-    "local_context_budget": 2500,
+    "local_context_budget": 1200,
     "max_file_bytes": 98304,
     "max_files": 5000,
     "max_scan_bytes": 25000000,
@@ -36,15 +36,15 @@ DEFAULTS = {
     "opencode_bin": "opencode",
     "ollama_url": "http://127.0.0.1:11434",
     "local_model": "agentctl-helper:latest",
-    "local_base_model": "qwen2.5-coder:7b-instruct-q4_K_M",
-    "local_num_ctx": 8192,
-    "local_num_predict": 1024,
+    "local_base_model": "qwen2.5-coder:3b-instruct-q4_K_M",
+    "local_num_ctx": 4096,
+    "local_num_predict": 512,
 }
 
-CONFIG_TEXT = '''# agentctl 0.1 -- Linux / 16 GB RAM / GTX 1080 Ti starting profile.
+CONFIG_TEXT = '''# agentctl 0.1 -- Linux / GTX 1050 Ti 4 GB starting profile.
 # Budgets are approximate prompt estimates, not model or billing limits.
 context_budget = 6000
-local_context_budget = 2500
+local_context_budget = 1200
 max_file_bytes = 98304
 max_files = 5000
 max_scan_bytes = 25000000
@@ -54,9 +54,9 @@ codex_bin = "codex"
 opencode_bin = "opencode"
 ollama_url = "http://127.0.0.1:11434"
 local_model = "agentctl-helper:latest"
-local_base_model = "qwen2.5-coder:7b-instruct-q4_K_M"
-local_num_ctx = 8192
-local_num_predict = 1024
+local_base_model = "qwen2.5-coder:3b-instruct-q4_K_M"
+local_num_ctx = 4096
+local_num_predict = 512
 '''
 
 

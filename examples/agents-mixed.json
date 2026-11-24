@@ -26,18 +26,18 @@
     },
     "advisor": {
       "backend": "claude-sdk",
-      "instructions": "Inspect the requested narrow question and return concise evidence, file paths and uncertainties. Do not edit files.",
+      "instructions": "Inspect the requested question and return concise evidence, file paths and uncertainties. When coder asks for advice, send coder any finding it needs for implementation.",
       "write_scope": [],
-      "peers": [],
+      "peers": ["coder"],
       "project_tools": []
     },
     "coder": {
       "backend": "codex",
-      "instructions": "Implement the delegated coding task in the existing project, run appropriate checks, and report exact results. Return the required JSON.",
+      "instructions": "Ask advisor to inspect the relevant code before completing the task. Use its findings, run appropriate checks, and report exact results. Send worker a progress note when it delegates a task to you.",
       "write_scope": [
         "**"
       ],
-      "peers": [],
+      "peers": ["advisor", "worker"],
       "project_tools": []
     }
   },
@@ -75,6 +75,11 @@
       "timeout_seconds": 900,
       "max_turns_per_agent": 12,
       "max_reported_cost_usd": 5.0
+    },
+    "codex-led": {
+      "worker": "coder",
+      "reviewer": "reviewer",
+      "required_checks": ["tests"]
     }
   }
 }

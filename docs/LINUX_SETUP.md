@@ -1,4 +1,4 @@
-# Linux / 16 GB RAM / GTX 1080 Ti
+# Linux / GTX 1050 Ti 4 GB
 
 ## Division of work
 
@@ -8,10 +8,10 @@ The starting configuration is:
 
 | Setting | Starting value | Reason |
 |---|---|---|
-| Base model | `qwen2.5-coder:7b-instruct-q4_K_M` | Modest download and a focused coding model to benchmark. |
-| Local context | 8192 tokens | Leaves more memory headroom than a very large context. |
-| Local packet estimate | 2500 tokens | Leaves room for formatting and generated output. |
-| Local output allowance | 1024 tokens | Bounded analysis, not long autonomous work. |
+| Base model | `qwen2.5-coder:3b-instruct-q4_K_M` | Fits the 1050 Ti profile more realistically than a 7B model. |
+| Local context | 4096 tokens | Limits KV-cache pressure on 4 GB VRAM. |
+| Local packet estimate | 1200 tokens | Leaves room for formatting and generated output. |
+| Local output allowance | 512 tokens | Bounded analysis, not long autonomous work. |
 | Concurrent local requests | 1 | Controls KV-cache and host memory pressure. |
 | Loaded local models | 1 | Avoids competing model allocations. |
 | Hosted readers | At most 2 | Limits duplicated work and local process overhead. |
@@ -31,7 +31,7 @@ nvidia-smi
 
 Python must be 3.11 or newer. Use your distribution's package manager if necessary. If you already use Codex, keep that installation and sign-in. If it is missing, follow the official [Codex CLI documentation](https://learn.chatgpt.com/docs/codex-cli).
 
-Ollama's hardware documentation lists the GTX 1080 Ti under compute capability 6.1. As checked on 2026-10-01, it specifies driver version 570 or newer for compute capability 5.0 through 6.2. Select a proprietary driver branch supported by both your Linux distribution and the Pascal GPU; do not assume every newer driver branch still supports every older card. agentctl does not change GPU drivers.
+The GTX 1050 Ti is a Pascal compute-capability 6.1 card. Check Ollama's current GPU support page and your distribution's supported NVIDIA driver branch before installing; agentctl does not change GPU drivers. Do not assume every newer driver branch still supports every older Pascal card.
 
 If `nvidia-smi` fails, resolve that before assuming GPU acceleration is working. `agentctl doctor` prints the observed card, free VRAM, driver, available RAM, and runtime information; it cannot install hardware drivers.
 
@@ -92,13 +92,13 @@ agentctl models status
 ollama ps
 ```
 
-The default base model is about 4.7 GB on disk; reserve additional space and memory for runtime overhead. `models setup` creates the alias `agentctl-helper:latest`. It does not train or fine-tune a model.
+The default 3B base model is several GB on disk; reserve additional space and memory for runtime overhead. `models setup` creates the alias `agentctl-helper:latest`. It does not train or fine-tune a model.
 
 Inspect model placement with `ollama ps` and the reported VRAM allocation. CPU offloading may still work but can change latency substantially. Do not choose a larger model just because its file fits in nominal VRAM: context memory and overhead also count.
 
 The benchmark checks whether one small Python-reading question is answered as correct structured JSON and reports observed generation tokens per second. Use it to confirm the installation, then try representative project tasks. A tiny smoke test is not evidence of reliable autonomous coding.
 
-If memory is tight, reduce `local_num_ctx` to 4096 and `local_context_budget` to 1500 in `.agentctl/config.toml`, then rerun `models setup` for the alias. If you need a smaller model, use a compatible explicit `--base` with `models setup`. The app never downloads a replacement model without a setup command.
+If memory is tight, reduce `local_num_ctx` to 2048 and `local_context_budget` to 700 in `.agentctl/config.toml`, then rerun `models setup` for the alias. If you need a different model, use a compatible explicit `--base` with `models setup`. The app never downloads a replacement model without a setup command.
 
 ## 5. Use the local helper on a project
 

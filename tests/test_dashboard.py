@@ -211,10 +211,19 @@ class DashboardWorkspace(BaseWorkspace):
             self.assertIn("dashboard: http://127.0.0.1:",line)
             port=int(line.rsplit(":",1)[1])
             conn=http.client.HTTPConnection("127.0.0.1",port,timeout=3)
-            for path,expected in [("/","Agent workspace"),("/app.js","loadEvents"),("/style.css",".workspace-grid")]:
+            for path,expected in [("/","/portraits.js"),("/app.js","loadEvents"),("/portraits.js","agentPortrait"),("/style.css",".workspace-grid")]:
                 conn.request("GET",path);response=conn.getresponse()
                 self.assertEqual(response.status,200)
                 self.assertIn(expected,response.read().decode())
+            for path in ("/flux.webp", "/droplets.webp"):
+                with self.subTest(path=path):
+                    conn.request("GET", path)
+                    response = conn.getresponse()
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.getheader("Content-Type"), "image/webp")
+                    image = response.read()
+                    self.assertEqual(image[:4], b"RIFF")
+                    self.assertEqual(image[8:12], b"WEBP")
             conn.close()
         finally:
             proc.send_signal(signal.SIGINT)

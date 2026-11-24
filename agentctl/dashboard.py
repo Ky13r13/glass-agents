@@ -364,7 +364,7 @@ class Dashboard:
                 job["run"] = {k: rec.get(k) for k in ("id", "status", "pid", "usage", "reported_cost_usd", "elapsed_seconds",
                                                      "answer_excerpt", "commands_observed", "changes", "checks", "manifest",
                                                      "error", "provider_error", "argv", "thread_id", "folder",
-                                                     "agent_activity", "agent_sessions", "loop_outcome", "loop_iteration")}
+                                                     "agent_activity", "agent_sessions", "loop_outcome", "loop_iteration", "workflow_type")}
                 job["run"]["agent_names"] = rec.get("agent_names", [])
                 job["sockets"] = process_connections(rec.get("pid")) if job["status"] in ACTIVE else []
         history = [{k: r.get(k) for k in ("id", "goal", "created", "backend", "status", "usage", "folder")}
@@ -441,7 +441,7 @@ class Dashboard:
                         raise ValueError()
                     value = event_summary(event)
                     value["raw_type"] = event.get("type")
-                    value["timestamp"] = event.get("timestamp")
+                    value["timestamp"] = event.get("timestamp") or event.get("time")
                     events.append(json.loads(redact(json.dumps(value))))
                 except ValueError:
                     events.append({"kind": "diagnostic", "label": "CLI output", "text": redact(line.decode(errors="replace")[:4000])})
@@ -564,13 +564,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send({"error": "Local origin required."}, 403)
             return
         url = urlsplit(self.path)
-        if not post and url.path in {"/", "/app.js", "/style.css"}:
-            names = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css")}
+        names = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
+                 "/portraits.js": ("portraits.js", "text/javascript"), "/style.css": ("style.css", "text/css"),
+                 "/flux.webp": ("flux.webp", "image/webp"), "/droplets.webp": ("droplets.webp", "image/webp")}
+        if not post and url.path in names:
             name, mime = names[url.path]
-            content = files("agentctl").joinpath("web", name).read_text()
+            content = files("agentctl").joinpath("web", name).read_bytes()
             if name == "index.html":
-                content = content.replace("__AGENTCTL_TOKEN__", self.server.token)
-            self.send(content, content_type=mime + "; charset=utf-8")
+                content = content.replace(b"__AGENTCTL_TOKEN__", self.server.token.encode())
+            self.send(content, content_type=mime if mime.startswith("image/") else mime + "; charset=utf-8")
             return
         if not secrets.compare_digest(self.headers.get("X-Agentctl-Token", ""), self.server.token):
             self.send({"error": "Dashboard session expired. Reload the page."}, 403)

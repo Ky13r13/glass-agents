@@ -338,3 +338,37 @@ class AskAgent(SwarmWorkspace):
         rc, out, err = self.cli("agents", "ask", "worker", "x", "--in", "missing")
         self.assertEqual(rc, 2)
         self.assertIn("does not exist", err)
+
+
+class DashboardFlow(SwarmWorkspace):
+    def test_event_summaries_carry_routing_for_the_communication_map(self):
+        from agentctl.adapters import event_summary
+        message = event_summary({"type": "agentctl.message.sent", "actor": "worker", "recipient": "advisor", "message": "hi",
+                                 "time": "2026-11-22T00:00:00+00:00"})
+        self.assertEqual(message["flow"], {"type": "message.sent", "actor": "worker", "recipient": "advisor"})
+        review = event_summary({"type": "agentctl.agent.completed", "actor": "beta.judge", "candidate": "beta", "agent": "judge",
+                                "response": {"decision": "accept", "score": 9, "feedback": "x" * 5000}})
+        self.assertEqual(review["flow"]["decision"], "accept")
+        self.assertNotIn("feedback", review["flow"])
+        long = event_summary({"type": "agentctl.agent.started", "actor": "a", "parent": "p" * 500})
+        self.assertNotIn("parent", long["flow"], "Only short routing values are passed to the browser.")
+        self.assertNotIn("flow", event_summary({"type": "item.completed", "item": {"type": "agent_message", "text": "x"}}))
+
+    def test_dashboard_events_expose_flow_and_controller_timestamps(self):
+        from agentctl.dashboard import Dashboard
+        write_json(self.root / ".agentctl/agents.json", swarm_config())
+        record = prepare_feedback(self.root, self.cfg, "Improve the CSV export")
+        events = [{"type": "agentctl.candidate.created", "actor": "swarm", "slot": "a", "agent": "a", "time": "2026-11-22T01:02:03+00:00"},
+                  {"type": "agentctl.agent.started", "actor": "a.critic", "candidate": "a", "agent": "critic", "backend": "claude-sdk",
+                   "time": "2026-11-22T01:02:04+00:00"}]
+        Path(record["folder"], "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+        record["status"] = "completed"
+        Store(self.root).save(record)
+        manager = Dashboard(self.root, self.cfg)
+        try:
+            result = manager.events(record["id"])
+        finally:
+            manager.close()
+        self.assertEqual([e["flow"]["type"] for e in result["events"]], ["candidate.created", "agent.started"])
+        self.assertEqual(result["events"][1]["timestamp"], "2026-11-22T01:02:04+00:00")
+        self.assertEqual(result["events"][1]["flow"]["backend"], "claude-sdk")

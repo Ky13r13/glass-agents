@@ -170,36 +170,71 @@ def process_connections(pid):
     return [{"address": ip, "port": port, "state": "established"} for ip, port in sorted(found)][:40]
 
 
+FLOW_FIELDS = ("actor", "agent", "candidate", "parent", "recipient", "tool", "slot", "call_id",
+               "decision", "leader", "qualified", "outcome", "status", "checks_pass", "backend", "model")
+
+
+def flow_fields(event):
+    """Short, typed routing fields the dashboard uses to draw who talks to whom."""
+    kind = str(event.get("type", ""))
+    flow = {"type": kind.removeprefix("agentctl.")}
+    for key in FLOW_FIELDS:
+        value = event.get(key)
+        if isinstance(value, (bool, int, float)) or (isinstance(value, str) and len(value) <= 200):
+            flow[key] = value
+    review = event.get("review")
+    if isinstance(review, dict) and isinstance(review.get("decision"), str):
+        flow["decision"] = review["decision"]
+    response = event.get("response")
+    if isinstance(response, dict) and isinstance(response.get("decision"), str):
+        flow["decision"] = response["decision"]
+    return flow
+
+
 def event_summary(event):
     """Provider events become display data only, never HTML or executable commands."""
     kind = str(event.get("type", "unknown"))
     if kind.startswith("agentctl."):
-        actor = str(event.get("actor", "controller"))
-        if kind == "agentctl.peer.event":
-            value = dict(event.get("event", {}))
-            value["label"] = actor + " · " + value.get("label", "Peer activity")
-            return value
-        label = actor + " · " + kind.removeprefix("agentctl.").replace(".", " ")
-        if kind == "agentctl.agent.message":
-            return {"kind": "message", "label": label, "text": str(event.get("text", ""))}
-        if kind == "agentctl.review.decision":
-            return {"kind": "message", "label": label,
-                    "text": json.dumps({"review": event.get("review"), "checks_pass": event.get("checks_pass"),
-                                        "accepted": event.get("accepted")}, indent=2)}
-        if kind in {"agentctl.tool.started", "agentctl.tool.requested", "agentctl.tool.completed",
-                    "agentctl.project_tool.started", "agentctl.project_tool.completed"}:
-            value = event.get("input", event.get("argv", event.get("result", "")))
-            return {"kind": "tool", "label": actor + " · " + str(event.get("tool", "")),
-                    "text": value if isinstance(value, str) else json.dumps(value, indent=2)[:16000],
-                    "status": kind.rsplit(".", 1)[-1]}
-        if kind == "agentctl.message.sent":
-            return {"kind": "message", "label": actor + " → " + str(event.get("recipient")),
-                    "text": str(event.get("message", ""))}
-        if kind == "agentctl.revision.requested":
-            return {"kind": "message", "label": label, "text": str(event.get("feedback", ""))[:16000]}
-        if kind.endswith(".failed") or kind == "agentctl.scope.violation":
-            return {"kind": "error", "label": label, "text": str(event.get("error", event.get("paths", "")))}
-        return {"kind": "status", "label": label, "text": str(event.get("outcome", event.get("task", "")))}
+        value = agentctl_summary(event, kind)
+        value["flow"] = flow_fields(event)
+        return value
+    return provider_summary(event, kind)
+
+
+def agentctl_summary(event, kind):
+    actor = str(event.get("actor", "controller"))
+    if kind == "agentctl.peer.event":
+        value = dict(event.get("event", {}))
+        value["label"] = actor + " · " + value.get("label", "Peer activity")
+        return value
+    label = actor + " · " + kind.removeprefix("agentctl.").replace(".", " ")
+    if kind == "agentctl.agent.message":
+        return {"kind": "message", "label": label, "text": str(event.get("text", ""))}
+    if kind == "agentctl.review.decision":
+        return {"kind": "message", "label": label,
+                "text": json.dumps({"review": event.get("review"), "checks_pass": event.get("checks_pass"),
+                                    "accepted": event.get("accepted")}, indent=2)}
+    if kind in {"agentctl.tool.started", "agentctl.tool.requested", "agentctl.tool.completed",
+                "agentctl.project_tool.started", "agentctl.project_tool.completed"}:
+        value = event.get("input", event.get("argv", event.get("result", "")))
+        return {"kind": "tool", "label": actor + " · " + str(event.get("tool", "")),
+                "text": value if isinstance(value, str) else json.dumps(value, indent=2)[:16000],
+                "status": kind.rsplit(".", 1)[-1]}
+    if kind == "agentctl.message.sent":
+        return {"kind": "message", "label": actor + " → " + str(event.get("recipient")),
+                "text": str(event.get("message", ""))}
+    if kind == "agentctl.revision.requested":
+        return {"kind": "message", "label": label, "text": str(event.get("feedback", ""))[:16000]}
+    if kind.endswith(".failed") or kind == "agentctl.scope.violation":
+        return {"kind": "error", "label": label, "text": str(event.get("error", event.get("paths", "")))}
+    if kind == "agentctl.swarm.round":
+        return {"kind": "status", "label": label, "text": str(event.get("summary", ""))}
+    if kind == "agentctl.candidate.dropped":
+        return {"kind": "error", "label": label, "text": str(event.get("reason", ""))}
+    return {"kind": "status", "label": label, "text": str(event.get("outcome", event.get("task", "")))}
+
+
+def provider_summary(event, kind):
     item = event.get("item", event.get("part", {}))
     if not isinstance(item, dict):
         item = {}

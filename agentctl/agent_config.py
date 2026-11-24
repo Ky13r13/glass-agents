@@ -245,7 +245,18 @@ def validate_swarm(name, workflow, agents):
 
 
 def covered(scope, patterns):
-    return any(fnmatch.fnmatch(scope, p) or scope.startswith(p.rstrip("/") + "/") for p in patterns)
+    if not any(char in scope for char in "*?["):
+        return any(fnmatch.fnmatch(scope, p) or scope.startswith(p.rstrip("/") + "/") for p in patterns)
+    # Matching the text of one glob against another does not prove containment.
+    for pattern in patterns:
+        if scope == pattern:
+            return True
+        if not any(char in pattern for char in "*?[") and scope.startswith(pattern.rstrip("/") + "/"):
+            return True
+        wildcard = re.fullmatch(r"([^*?\[]*)\*+([^*?\[\]]*)", pattern)
+        if wildcard and scope.startswith(wildcard[1]) and scope.endswith(wildcard[2]):
+            return True
+    return False
 
 
 def ask_config(config, agent, folder=None, scopes=(), read_only=False, checks=(), limits_from="default"):
@@ -276,9 +287,12 @@ def ask_config(config, agent, folder=None, scopes=(), read_only=False, checks=()
         spec["write_scope"] = narrowed
         # Delegated writers cannot exceed the narrowed caller.
         for peer in list(spec["peers"]):
-            if config["agents"][peer]["write_scope"]:
-                if narrowed:
-                    config["agents"][peer]["write_scope"] = list(narrowed)
+            peer_scopes = config["agents"][peer]["write_scope"]
+            if peer_scopes:
+                shared = [s for s in peer_scopes if covered(s, narrowed)]
+                shared.extend(s for s in narrowed if s not in shared and covered(s, peer_scopes))
+                if shared:
+                    config["agents"][peer]["write_scope"] = shared
                 else:
                     spec["peers"].remove(peer)
     base = config["workflows"].get(limits_from, {})

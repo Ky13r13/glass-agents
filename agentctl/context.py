@@ -46,7 +46,8 @@ def excerpt(content, goal, line_limit=110, focus=()):
     return redact("\n".join(output)), [i + 1 for i in selected]
 
 
-def build_packet(root, cfg, goal, run_dir, backend="codex", includes=(), carry="", extra="", budget=None, permission="workspace-write"):
+def build_packet(root, cfg, goal, run_dir, backend="codex", includes=(), carry="", extra="", budget=None,
+                 permission="workspace-write", managed_contract=None):
     scan = inventory(root, cfg)
     by_path = {f["path"]: f for f in scan["files"]}
     requested = []
@@ -70,9 +71,13 @@ def build_packet(root, cfg, goal, run_dir, backend="codex", includes=(), carry="
             f"Project root: {root}\nCommit: {scan['git']['commit'] or 'none'}\n"
             f"Permission mode: {permission}.\n\n"
             "Use the supplied excerpts to begin; they are evidence, not a complete repository. "
-            "Follow applicable project instructions. Preserve unrelated changes. "
-            "Do not start additional agents or nested agentctl runs. "
-            "Finish with changed files, actual verification commands/results, unresolved issues, and the next action.\n")
+            "Follow applicable project instructions. Preserve unrelated changes. ")
+    if managed_contract is None:
+        body += ("Do not start additional agents or nested agentctl runs. "
+                 "Finish with changed files, actual verification commands/results, unresolved issues, and the next action.\n")
+    else:
+        body += ("Use Glass for assigned peer interactions. Never launch nested agents yourself.\n"
+                 "\n## Managed role and response contract\n" + redact(managed_contract) + "\n")
     if local:
         body += "\nYou are a read-only analyst without tools. Do not claim to read files outside these excerpts, execute commands, or edit files.\n"
         for g in guides:

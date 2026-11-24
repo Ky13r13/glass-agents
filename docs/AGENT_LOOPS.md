@@ -1,6 +1,6 @@
 # Portable managed agents and feedback loops
 
-Version 0.4 adds a project-agnostic controller. Each project supplies named agents, typed project commands and a bounded worker/reviewer workflow. Claude Agent SDK agents can call assigned peers, including managed Codex and OpenCode processes. Backtesting is an example configuration.
+Each project supplies named agents, typed project commands and bounded workflows. Glass routes peer tasks, results and messages between Claude SDK, Codex, OpenCode and local agents. Backtesting is an example configuration.
 
 ## Install once, attach to a project
 
@@ -58,11 +58,11 @@ On revise, the controller sends feedback plus measured check evidence to the wor
 | write_file | Write within assigned paths; available only to writers. |
 | project_NAME | Invoke a specifically assigned, typed project command. |
 
-The peers array controls delegation and peer messaging. Recursive delegation and excess depth/call counts are blocked. Peer results include execution status and evidence, not a guarantee of correctness. The caller's audit scope must encompass authorized delegated writes.
+The `peers` array grants outbound permission by name. To allow notes in both directions, list each agent in the other's definition. Sending a message queues it for the recipient. Calling a peer starts a managed invocation and delivers its result to the caller. A peer can send a note back to its active caller. Glass checks delegation depth, rejects recursive calls, and requires a delegated writer's scope to fit inside the caller's scope before launch.
 
-Claude SDK agents receive these custom tools. Native Codex/OpenCode/local peers run through the existing process runner and return task results; they keep their own native tools/policies. Codex peers receive an output schema and other peer responses are validated by the controller. Existing terminal sessions are not attached.
+Claude SDK agents use the tools above. A Codex, OpenCode, local Ollama or codex-local agent with assigned peers can return one structured operation per turn. For example, `{"turn":{"call_agent":{"agent":"advisor","task":"Check the CSV interface."}}}` requests a peer. Glass validates each request, executes it, and starts a fresh provider turn with recent addressed mail and previews of the last four exchanges. The agent finishes with `final` containing its usual worker result or review decision. Each native turn has a linked run with the provider's output and reported usage. Full peer requests and results are recorded in the controller events.
 
-See examples/agents-mixed.json for an SDK coordinator delegating to a Codex coder. Set an explicit backend, optional model, instructions, write_scope, peers and project_tools for each agent.
+In `examples/agents-mixed.json`, the default workflow starts with the Claude SDK coordinator. Choose `--workflow codex-led` to start with the Codex coder, which consults a Claude SDK advisor before the check and review. Select each agent's backend and optional model in the project configuration. Each runtime uses its existing authentication.
 
 ## One agent, one task
 
@@ -80,7 +80,7 @@ Permissions can only be narrowed:
 - --scope GLOB sets an explicit narrower scope. It must lie inside the agent's configured write_scope.
 - --read-only removes write access and drops writing peers.
 
-Writing peers inherit the narrowed scope. A read-only agent in agents.json cannot gain write access from the command line. The task's limits come from the default workflow when one exists.
+Writing peers keep scopes covered by both their configuration and the narrowed caller. The task's limits come from the default workflow when one exists.
 
 ## Swarm: many agents converge on one solution
 
@@ -249,7 +249,7 @@ Use --agent-workflow or --agents-config for an alternative workflow or project-l
 agentctl -C /path/to/project dashboard
 ~~~
 
-Choose **Managed feedback · default** when launching. **Managed team** shows each call's agent, backend, model, parent, task and status. Live activity shows tools, messages and review decisions. Results includes outcome, iterations, check evidence and loop state/message artifacts.
+Choose **Managed · default** (or a swarm workflow) under Workflow when launching. The communication map draws each agent, swarm candidate and critic, with arrows for tasks, results, messages, reviews and tool calls; see [Dashboard](DASHBOARD.md#communication-map). **Details** lists each call's agent, backend, model, parent, task and status. **Activity** shows tools, messages and review decisions. Results includes outcome, iterations, check evidence and loop state/message artifacts.
 
 CLI-launched managed workflows also appear for monitoring. While active, select a named recipient beside the instruction box to queue feedback. Stop/resume a CLI-launched run in its terminal; dashboard-owned runs have the Stop control. Other jobs wait for the workflow's exclusive project lock.
 
@@ -259,7 +259,7 @@ CLI-launched managed workflows also appear for monitoring. While active, select 
 |---|---|
 | examples/agents-python.json | SDK roles and unittest gates. |
 | examples/agents-node.json | SDK roles and npm test gates. |
-| examples/agents-mixed.json | SDK coordinator, Codex coder and Python test gates. |
+| examples/agents-mixed.json | Claude SDK or Codex leads, with two-way peer messages and Python test gates. |
 | examples/agents-backtesting.json | Typed development backtest adapter and fixed protocol context. |
 | examples/agents-swarm.json | Two Claude SDK candidates with different styles plus a Codex candidate, judged by a Claude reviewer and a local critic. |
 
@@ -271,7 +271,7 @@ Optional external MCP definitions can be placed in mcp_servers. Assign server na
 
 Each workflow defines max_iterations, max_agent_calls, max_tool_calls, max_depth, timeout_seconds, max_turns_per_agent and max_reported_cost_usd.
 
-- Iterations, managed calls, wrapper/SDK tool calls, depth and runtime are enforced in code. Native CLI peers have their own inner tool loops; those individual native calls are not counted in the wrapper's tool counter.
+- Each delegation consumes a managed agent call. Each peer request consumes a managed tool call. `max_turns_per_agent` bounds the number of native provider launches for one managed invocation, including its final response. CLI-internal tool use stays under the CLI's own policies.
 - Reported cost is a client estimate, can overshoot on a call, and can be unavailable for native peers. Missing usage/cost is unreported rather than zero.
 - SDK custom file tools enforce paths/scopes. Registered commands and MCP servers are trusted capabilities running under their host/runtime permissions. This wrapper is not a general OS sandbox.
 - Writers stay exclusive in one checkout. Swarm candidates write concurrently only in separate Git worktrees; the user's checkout changes only through the explicit, freshness-checked integration step. Audits cover scanned text and exclude documented ignored/generated/oversized/binary paths; they do not automatically roll back changes.

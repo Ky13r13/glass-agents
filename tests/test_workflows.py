@@ -271,11 +271,15 @@ class Workspace(BaseWorkspace):
         self.assertFalse((self.root / "result.py").exists())
 
 
-class LocalAPI(BaseWorkspace):
+class LocalWorkspace(BaseWorkspace):
+    def chat_answer(self, body):
+        return json.dumps({"result":15,"mutation":False}) if "format" in body else "Read-only fixture analysis."
+
     def setUp(self):
         super().setUp()
         self.requests = []
         requests = self.requests
+        chat_answer = self.chat_answer
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
@@ -284,7 +288,7 @@ class LocalAPI(BaseWorkspace):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 requests.append(body)
-                answer = json.dumps({"result":15,"mutation":False}) if "format" in body else "Read-only fixture analysis."
+                answer = chat_answer(body)
                 self.send_value({"message":{"role":"assistant","content":answer},"done":True,"done_reason":"stop", "prompt_eval_count":30, "eval_count":12, "eval_duration":1000000000})
             def send_value(self, value):
                 raw = json.dumps(value).encode()
@@ -304,6 +308,8 @@ class LocalAPI(BaseWorkspace):
         self.thread.join()
         super().tearDown()
 
+
+class LocalAPI(LocalWorkspace):
     def test_local_worker_uses_context_limit_and_no_tools(self):
         rec = prepare_run(self.root, self.cfg, "Explain CSV export", backend="local", permission="read-only")
         rec = execute_run(self.root, self.cfg, rec, quiet=True)

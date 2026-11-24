@@ -7,7 +7,7 @@ from .local import Ollama
 
 def main():
     request = json.load(sys.stdin)
-    response = Ollama(request["config"]).chat(request["prompt"], model=request.get("model"))
+    response = Ollama(request["config"]).chat(request["prompt"], model=request.get("model"), schema=request.get("schema"))
     print(json.dumps({"type": "local.response", "response": response}), flush=True)
 
 

@@ -12,7 +12,7 @@ Global directory option: `agentctl -C /path/to/project COMMAND`. The directory f
 | `agents apply ID [--candidate SLOT] [--allow-unaccepted] [--no-checks]` | Apply a finished swarm's winner (or chosen candidate) to the working tree and rerun required checks there. |
 | `agents demo [--output NEW_DIR] [--swarm]` | Run isolated scripted agents with real tools and check-driven feedback; `--swarm` uses real worktrees. No model calls. |
 | `agents message ID --to NAME --text TEXT` | Queue operator feedback for a managed agent. |
-| `agents messages ID [--to NAME]` | Read a run's managed-agent mailbox. |
+| `agents messages ID [--to NAME]` | Read addressed operator and peer messages in a managed run. |
 | `agents events ID [--follow]` | Inspect the actual event stream. |
 | `dashboard [--port 8765] [--no-browser]` | Open the local browser dashboard for an initialized project. |
 | `dashboard --demo` | Preview isolated synthetic CLI activity without connecting a model. |
@@ -37,7 +37,9 @@ Global directory option: `agentctl -C /path/to/project COMMAND`. The directory f
 
 `start`, `context`, and `resume` accept `--backend codex|opencode|local|codex-local|claude-sdk`, `--include PATH` (repeatable), `--budget N`, `--model NAME`, `--read-only`, `--prepare-only`, and `--interactive`. OpenCode requires workspace-write scheduling; --read-only is not supported for that backend. Managed feedback uses exclusive scheduling and per-agent scopes from agents.json; use `--agent-workflow` or `--agents-config` to choose alternate definitions. Only hosted Codex supports interactive terminal mode. `resume --run ID` selects a particular earlier run. `checkpoint --run ID` selects the run to describe.
 
-`codex-local` is experimental and read-only. The `local` backend is always read-only and has no tools. Select a new `start` task to move from an earlier read-only continuation to an editing task.
+`agents run` and `agents ask` route messages and delegated tasks using each agent's `peers` list across all managed backends. `agents events ID --follow` shows calls and returned results. In `examples/agents-mixed.json`, the `codex-led` workflow starts a Codex coder with a Claude SDK advisor and reviewer.
+
+`codex-local` is experimental and read-only. The `local` backend is a read-only analyst. Within a managed workflow it can request actions from Glass through structured responses. Select a new `start` task to move from an earlier read-only continuation to an editing task.
 
 ## Editable defaults
 

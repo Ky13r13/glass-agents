@@ -19,4 +19,4 @@ agentctl = "agentctl.cli:main"
 include = ["agentctl*"]
 
 [tool.setuptools.package-data]
-agentctl = ["web/*.html", "web/*.js", "web/*.css"]
+agentctl = ["web/*.html", "web/*.js", "web/*.css", "web/*.webp"]
