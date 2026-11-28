@@ -1,6 +1,6 @@
 # Glass agents
 
-Glass is a local agent dashboard for **Claude Agent SDK, Codex, OpenCode, and Ollama**. Its Linux CLI is `agentctl`. Attach agent definitions to a project, delegate to named peers, and follow their messages on the communication map. The dashboard runs on Python 3.11+ on Linux or WSL. Managed agent workflows use optional dependencies.
+Glass is a local agent dashboard for **Claude Agent SDK, Codex, OpenCode, and Ollama**. Its CLI is `agentctl`. Attach agent definitions to a project, delegate to named peers, and follow their messages on the communication map. The dashboard supports Python 3.11+ on Linux, WSL, and native Windows. Managed agent workflows use optional dependencies.
 
 ## Open the dashboard
 
@@ -24,6 +24,12 @@ python3 -m agentctl -C /path/to/your/project dashboard
 ~~~
 
 The dashboard opens at **http://127.0.0.1:8765**. In **Connections**, set the path to your existing Codex or OpenCode executable, then use **New agent** to choose a CLI, model, access mode, task, and optional input files. CLI authentication is reused from your terminal environment. **Check CLI** tests executable discovery/version, not provider authentication.
+
+In **Teams**, describe a project, choose **Draft with** (Codex, Claude Code, or Ollama), and click **Draft team**. Choose the runtimes the planner is allowed to put on the team separately. Glass shows the drafting stage, elapsed time, and the last provider activity. Choose **Start a new project** to include scaffolding in the approved run. Review the draft, save it, then click **Launch team**. Follow exchanges in the communication map and open **Results** for the output.
+
+### Native Windows
+
+Follow the [one-page Windows setup guide](docs/WINDOWS_SETUP.md) to try the demo or start a project with Claude or Codex. The communication map works on Windows, while process socket sampling uses Linux's `/proc`.
 
 Each task has live reported activity, configured provider/MCP metadata, sampled TCP connections while its process is active, output artifacts and verification evidence. Send a follow-up after a task finishes or stop it before redirecting the work. Follow-ups are fresh runs with the previous result as context. The dashboard manages the CLI processes it starts; existing interactive terminal sessions stay in their original terminals.
 

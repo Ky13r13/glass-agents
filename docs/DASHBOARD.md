@@ -1,5 +1,11 @@
 # Agent dashboard
 
+**Teams** edits the project's existing agent definitions and single-lead or feedback workflows. Describe the task, pick **Draft with**, select the eligible team runtimes, and use **Draft team**. The drafting provider receives the task in an isolated working directory and leaves project files alone. **Start a new project** includes scaffolding instructions for the approved run. The planner can propose up to 200 agents within the project's total 250-agent limit. Team members run as invoked by the lead, reviewer, or a permitted peer. Large rosters do not imply simultaneous execution.
+
+The draft progress area reports startup, drafting, and validation for the selected provider. Its timer measures elapsed time and tracks the most recent provider event. **Cancel draft** stops the planner. A draft that reaches its time limit displays an error and can be retried.
+
+The draft needs the optional managed-agent dependencies and a working runtime for the selected provider. Codex uses the configured CLI, Claude Code uses the Claude Agent SDK with its existing authentication, and Ollama uses the project's configured local model. For Ollama, smaller teams fit more readily into the configured output limit. Review the roles and write scopes before saving and launching. Use **Can contact** to grant outgoing message and delegation access. Queued messages are available on the recipient's next invocation or mailbox read.
+
 Choose a run from the **Runs** list to open its communication map. On wide screens the list sits to the right of the map. **Activity**, **Results** and **Details** sit below the map. The top bar holds navigation, live counts and **New agent**.
 
 ## Communication map
@@ -27,7 +33,7 @@ How it behaves:
 
 Arrows come only from recorded events: managed-agent events, CLI tool events and sampled sockets. They show reported activity, not a packet capture. Provider arrows show which backend an agent uses, not a verified network destination.
 
-Version 0.4 adds portable **Managed feedback** workflows. The managed team is drawn on the map and listed under **Details**. Run agentctl agents init in your project, configure its roles/tools/checks, then select Managed feedback in the launch form. These workflows automatically pass structured review feedback into the next iteration. CLI-launched managed runs also appear for monitoring and addressed operator messages. Existing workflow templates below remain fixed job graphs. See [Portable agent loops](AGENT_LOOPS.md) for setup and exact behavior.
+The dashboard can now finish first-run setup itself. Open it for a project folder and use the **Set up agents** card to create `.agentctl/agents.json`; existing guidance and definitions are preserved. The managed team is drawn on the map and listed under **Details**. Configure its roles/tools/checks, then select Managed feedback in the launch form. These workflows automatically pass structured review feedback into the next iteration. CLI-launched managed runs also appear for monitoring and addressed operator messages. Existing workflow templates below remain fixed job graphs. See [Portable agent loops](AGENT_LOOPS.md) for setup and exact behavior.
 
 Version 0.3 extends the existing agentctl project with a local browser GUI. The underlying tools remain your installed Codex/OpenCode CLIs and optional Ollama server. There is no additional agent framework, hosted account or JavaScript build step to maintain.
 

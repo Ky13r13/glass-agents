@@ -272,7 +272,11 @@ class Workspace(BaseWorkspace):
 
 
 class LocalWorkspace(BaseWorkspace):
+    draft_proposal = None
+
     def chat_answer(self, body):
+        if self.draft_proposal is not None:
+            return json.dumps(self.draft_proposal)
         return json.dumps({"result":15,"mutation":False}) if "format" in body else "Read-only fixture analysis."
 
     def setUp(self):
@@ -327,6 +331,20 @@ class LocalAPI(LocalWorkspace):
     def test_remote_endpoint_rejected(self):
         with self.assertRaises(UserError):
             Ollama(dict(self.cfg, ollama_url="https://example.com"))
+
+    def test_ollama_can_draft_a_team_with_an_independent_execution_provider(self):
+        from agentctl.dashboard import Dashboard
+        self.draft_proposal = {"summary": "Ollama fixture", "lead": "builder", "reviewer": "", "agents": [
+            {"name": "builder", "backend": "codex", "instructions": "Build the fixture.",
+             "write_scope": ["**"], "peers": []}]}
+        manager = Dashboard(self.root, self.cfg)
+        self.addCleanup(manager.close)
+        result = manager.draft_team({"provider": "local", "goal": "Create a small demo",
+                                     "mode": "scaffold", "backends": ["codex"]})
+        self.assertEqual(result["agents"][0]["backend"], "codex")
+        request = self.requests[-1]
+        self.assertNotIn("tools", request)
+        self.assertEqual(request["format"]["properties"]["agents"]["items"]["properties"]["backend"]["enum"], ["codex"])
 
     def test_installed_zipapp_launches_local_worker_from_another_directory(self):
         source = Path(__file__).resolve().parents[1]

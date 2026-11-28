@@ -43,6 +43,15 @@ function agentPortrait(identity, status) {
   return root;
 }
 
+function brandPortrait() {
+  const portrait = agentPortrait('glass-mascot', 'completed');
+  portrait.querySelector('.droplet-body').append(svg('path', {
+    d: 'M27 38 Q32 45 37 38', fill: 'none', stroke: '#272932',
+    'stroke-width': 2.4, 'stroke-linecap': 'round',
+  }));
+  return portrait;
+}
+
 // Translate in portrait coordinates so the response stays small at every viewport size.
 function attachDropletPull(target, portrait) {
   const pull = portrait.querySelector('.droplet-pull'), gaze = portrait.querySelector('.droplet-gaze');

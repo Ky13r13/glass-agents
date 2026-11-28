@@ -6,10 +6,17 @@ import os
 from pathlib import Path
 import re
 import socket
+import sys
 import tomllib
 from urllib.parse import urlsplit, urlunsplit
 
 from .common import UserError, run_command
+
+
+def provider_argv(cfg, backend):
+    if cfg.get("_demo_script"):
+        return [sys.executable, "-X", "utf8", cfg["_demo_script"]]
+    return [cfg[backend + "_bin"]]
 
 
 def opencode_command(cfg, root, packet, permission, model=None):
@@ -17,11 +24,12 @@ def opencode_command(cfg, root, packet, permission, model=None):
         raise UserError("OpenCode uses CLI-managed permissions, not the Codex read-only sandbox. "
                         "Select workspace-write (exclusive) or use Codex for sandboxed readers.")
     # V2 may otherwise dispatch to a shared server outside our process group.
-    help_result = run_command([cfg["opencode_bin"], "run", "--help"], root, timeout=8)
+    prefix = provider_argv(cfg, "opencode")
+    help_result = run_command([*prefix, "run", "--help"], root, timeout=8)
     if not help_result or help_result.returncode:
         raise UserError("Could not inspect opencode run --help. Check the executable in Connections.")
     help_text = (help_result.stdout + help_result.stderr).decode(errors="replace")
-    cmd = [cfg["opencode_bin"], "run", "--format", "json"]
+    cmd = [*prefix, "run", "--format", "json"]
     if "--standalone" in help_text:
         cmd.append("--standalone")
     cmd += ["--agent", "build", "--file", str(packet)]

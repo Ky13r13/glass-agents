@@ -111,7 +111,8 @@ def interactive(root, cfg, record):
     record.update(status="running", started=now())
     Store(root).save(record)
     try:
-        rc = subprocess.call(cmd, cwd=root)
+        from .processes import native_argv
+        rc = subprocess.call(native_argv(cmd), cwd=root)
         record.update(status="interactive_closed" if rc == 0 else "failed", exit_code=rc)
     except KeyboardInterrupt:
         record.update(status="cancelled", error="Interactive session interrupted.")

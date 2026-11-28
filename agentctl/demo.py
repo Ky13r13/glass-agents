@@ -45,7 +45,6 @@ else:
 
 
 def make_runtime(root):
-    path = Path(root) / ".agentctl" / "synthetic-cli"
-    path.write_text(SCRIPT)
-    path.chmod(0o700)
+    path = Path(root) / ".agentctl" / "synthetic-cli.py"
+    path.write_text(SCRIPT, encoding="utf-8")
     return path

@@ -4,20 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="agentctl-token" content="__AGENTCTL_TOKEN__">
-  <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#f7f7f4">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#10141b">
   <title>Glass · Agent workspace</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
   <script defer src="/portraits.js"></script>
   <script defer src="/app.js"></script>
+  <script defer src="/teams.js"></script>
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/" aria-label="Glass home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Glass</a>
+  <a class="brand" href="/" aria-label="Glass home"><span class="brand-mark" id="glass-mascot" aria-hidden="true"></span>Glass</a>
   <button class="project-switch" id="project-info" title="Inspect workspace"><span id="project-name">Loading…</span></button>
   <nav class="nav" aria-label="Main navigation">
     <button class="nav-button active" data-view="agents">Agents <span class="nav-count" id="agent-count">0</span></button>
+    <button class="nav-button" data-view="teams">Teams</button>
     <button class="nav-button" data-view="connections">Connections</button>
     <button class="nav-button" data-view="history">History</button>
   </nav>
@@ -29,6 +31,15 @@
 </header>
 <div id="demo-banner" class="demo-banner" hidden>Demo workspace · synthetic activity, no models connected</div>
 <main class="content">
+  <section id="setup-card" class="setup-card panel" hidden>
+    <div class="setup-illustration" aria-hidden="true">✦</div>
+    <div class="setup-copy">
+      <p class="eyebrow">Workspace ready</p>
+      <h1>Set up Glass for this folder</h1>
+      <p>Glass can create its local project settings and starter agents here. Existing guidance and agent definitions are kept intact.</p>
+      <div class="setup-actions"><button class="button primary" id="setup-agents">Set up agents</button><button class="button secondary" id="setup-project">Just use Glass</button></div>
+    </div>
+  </section>
   <section id="view-agents" class="view">
     <h1 class="sr-only">Agent workspace</h1>
     <div class="workspace-grid">
@@ -42,8 +53,8 @@
       <section class="detail">
         <div id="selection-empty" class="panel selection-empty">
           <svg class="empty-graphic" viewBox="0 0 220 90" aria-hidden="true"><defs><marker id="empty-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs><rect x="4" y="30" width="54" height="30" rx="9"/><rect x="83" y="30" width="54" height="30" rx="9"/><rect x="162" y="8" width="54" height="30" rx="9"/><rect x="162" y="52" width="54" height="30" rx="9"/><path class="empty-edge" d="M58,45 L81,45" marker-end="url(#empty-arrow)"/><path class="empty-edge" d="M137,45 C150,45 148,23 160,23" marker-end="url(#empty-arrow)"/><path class="empty-edge" d="M137,45 C150,45 148,67 160,67" marker-end="url(#empty-arrow)"/></svg>
-          <h2>No agent selected</h2>
-          <p>Start an agent and watch, live, who it talks to.</p>
+          <h2>Your workspace is quiet</h2>
+          <p>Describe a task and Glass will prepare the right agent run for you.</p>
           <button class="button primary" id="empty-launch">＋ New agent</button>
         </div>
         <div id="selection-detail" hidden>
@@ -76,6 +87,78 @@
         </div>
       </section>
     </div>
+  </section>
+  <section id="view-teams" class="view" hidden>
+    <h1 class="page-title">Team Builder</h1>
+    <p id="team-status" role="status" class="muted"></p>
+    <button type="button" class="button secondary" id="team-reload" hidden>Reload saved team</button>
+    <section id="team-progress" class="draft-progress" aria-label="Team draft progress" hidden>
+      <div class="draft-progress-head"><strong id="team-progress-stage" role="status"></strong><span id="team-progress-time"></span></div>
+      <progress id="team-progress-bar" aria-label="Team draft in progress"></progress>
+      <p id="team-progress-activity" class="muted"></p>
+      <button type="button" class="button secondary small" id="team-draft-cancel" hidden>Cancel draft</button>
+    </section>
+    <form id="team-form" hidden>
+      <section class="team-brief" aria-label="Task prompt">
+        <label class="field" for="team-goal">What do you want to build?</label>
+        <textarea id="team-goal" rows="4" maxlength="12000" placeholder="Describe the first working version, your preferred stack, and how you’ll know it’s ready."></textarea>
+        <div class="team-brief-options">
+          <label class="field">Task type<select id="team-draft-mode"><option value="scaffold">Start a new project</option><option value="build">Change an existing project</option><option value="read-only">Read-only analysis</option></select></label>
+          <label class="field">Draft with<select id="team-draft-provider"><option value="codex">Codex</option><option value="claude-sdk">Claude Code</option><option value="local">Ollama</option></select></label>
+          <fieldset id="team-draft-backends">
+            <legend>Runtimes the team can use</legend>
+            <label><input type="checkbox" value="codex" checked> Codex</label>
+            <label><input type="checkbox" value="claude-sdk"> Claude</label>
+            <label><input type="checkbox" value="local"> Ollama</label>
+          </fieldset>
+          <button type="button" class="button primary" id="team-draft">Draft team</button>
+        </div>
+        <p class="muted">The selected provider receives the task description. Project work starts when you launch the team.</p>
+        <p class="muted" id="team-draft-summary" role="status" hidden></p>
+      </section>
+      <div class="team-layout">
+        <section aria-label="Agent roster">
+          <div class="team-heading"><h2>Agents</h2><span id="team-count" class="muted"></span></div>
+          <div id="team-roster" class="team-roster"></div>
+          <div class="team-actions">
+            <label>Count <input id="team-count-add" type="number" value="1" min="1"></label>
+            <button type="button" class="button secondary" id="team-add">Add agents</button>
+            <button type="button" class="button secondary" id="team-copy" disabled>Duplicate selected</button>
+          </div>
+        </section>
+        <section aria-label="Agent settings">
+          <h2>Agent settings</h2>
+          <p id="team-no-agent" class="muted">Add or select an agent to configure it.</p>
+          <div id="team-editor" hidden>
+            <div class="form-grid">
+              <label class="field">Name<input id="team-agent-name" maxlength="40"></label>
+              <label class="field">Runtime<select id="team-backend"><option value="claude-sdk">Claude</option><option value="codex">Codex</option><option value="local">Ollama</option><option value="opencode">OpenCode</option><option value="codex-local">Codex + Ollama</option></select></label>
+            </div>
+            <label class="field">Instructions<textarea id="team-instructions" maxlength="12000" rows="4"></textarea></label>
+            <div class="form-grid">
+              <label class="field">Model override<input id="team-model" placeholder="Optional"></label>
+              <label class="field">Write access<input id="team-scope" placeholder="Blank for read-only, ** for whole project"></label>
+            </div>
+            <h3>Can contact</h3>
+            <p class="muted">Select who this agent can message or delegate to. Set the reverse connection separately.</p>
+            <div id="team-peers" class="team-peers"></div>
+            <button type="button" class="button danger small" id="team-remove">Remove agent</button>
+          </div>
+        </section>
+      </div>
+      <section class="team-workflow" aria-label="Workflow">
+        <h2>Workflow</h2>
+        <div class="team-roles">
+          <label class="field">Saved workflow<select id="team-workflow"></select></label>
+          <label class="field" id="team-workflow-new">New workflow name<input id="team-workflow-name" value="team" maxlength="40"></label>
+          <label class="field">Lead agent<select id="team-lead"></select></label>
+          <label class="field">Reviewer <span class="optional">optional</span><select id="team-reviewer"></select></label>
+        </div>
+        <p class="muted">The lead starts the task and can call its peers. A reviewer must be read-only.</p>
+        <button class="button secondary" id="team-save">Save team</button>
+        <button type="button" class="button primary" id="team-run" disabled>Launch team</button>
+      </section>
+    </form>
   </section>
   <section id="view-connections" class="view" hidden><h1 class="page-title">Connections</h1><div id="connections-content"></div></section>
   <section id="view-history" class="view" hidden><h1 class="page-title">History</h1><div id="history-content" class="panel"></div></section>

@@ -11,7 +11,7 @@ import posixpath
 import re
 import tomllib
 
-from .common import CONFIG_TEXT, UserError, digest, load_config, read_text, run_command, state_dir, tokens, write_json, write_text
+from .common import CONFIG_TEXT, UserError, digest, is_link, load_config, read_text, run_command, state_dir, tokens, write_json, write_text
 
 
 SKIP_DIRS = {".git", ".agentctl", ".venv", "venv", "node_modules", "vendor", "dist", "build", "target", "__pycache__", ".pytest_cache", ".mypy_cache", ".next", ".cache"}
@@ -39,13 +39,15 @@ def redact(text):
 
 def allowed(root, rel, patterns):
     p = Path(rel)
-    if p.is_absolute() or ".." in p.parts or not p.parts:
+    if p.anchor or ".." in p.parts or not p.parts:
+        return False
+    if os.name == "nt" and (p.is_reserved() or any(":" in part or part.endswith((".", " ")) for part in p.parts)):
         return False
     if any(part in SKIP_DIRS for part in p.parts) or p.name in SKIP_FILES or secret_path(rel):
         return False
     full = root / p
     # Reject symlinks at every level, including links whose target is inside the repo.
-    if any((root.joinpath(*p.parts[:i])).is_symlink() for i in range(1, len(p.parts) + 1)):
+    if any(is_link(root.joinpath(*p.parts[:i])) for i in range(1, len(p.parts) + 1)):
         return False
     return not any(fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(p.name, pat) for pat in patterns)
 
@@ -71,7 +73,7 @@ def inventory(root, cfg=None):
     else:
         candidates = []
         for folder, dirs, names in os.walk(root, followlinks=False):
-            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not (Path(folder) / d).is_symlink())
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not is_link(Path(folder) / d))
             candidates.extend((Path(folder) / n).relative_to(root).as_posix() for n in sorted(names))
             if len(candidates) > cfg["max_files"] * 3:
                 break

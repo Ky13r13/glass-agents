@@ -14,7 +14,7 @@ Global directory option: `agentctl -C /path/to/project COMMAND`. The directory f
 | `agents message ID --to NAME --text TEXT` | Queue operator feedback for a managed agent. |
 | `agents messages ID [--to NAME]` | Read addressed operator and peer messages in a managed run. |
 | `agents events ID [--follow]` | Inspect the actual event stream. |
-| `dashboard [--port 8765] [--no-browser]` | Open the local browser dashboard for an initialized project. |
+| `dashboard [--port 8765] [--no-browser]` | Open the local browser dashboard. Use Teams to draft agents from a prompt, save project-local definitions, and launch a workflow. |
 | `dashboard --demo` | Preview isolated synthetic CLI activity without connecting a model. |
 | `init [path]` | Create minimal helpers and a fresh repository map; preserve existing guidance/config. |
 | `inspect [--json]` | Read-only inventory, helper recommendations and inferred commands. |
@@ -43,7 +43,7 @@ Global directory option: `agentctl -C /path/to/project COMMAND`. The directory f
 
 ## Editable defaults
 
-Version 0.3 adds **dashboard** with --port, --no-browser and --demo options. Put the global -C project option before the command. The real dashboard requires initialization; the synthetic demo creates its own temporary workspace.
+**dashboard** supports --port, --no-browser and --demo on Linux, WSL, and native Windows. Put the global -C project option before the command. The dashboard initializes the selected project when needed. The synthetic demo creates its own temporary workspace. **Teams** can draft with Codex, Claude Code, or Ollama, shows draft stages and elapsed time, and allows cancelling an in-progress draft.
 
 The scripted start/context/resume commands also accept **--backend opencode**. OpenCode runs use the CLI's own permissions and require workspace-write scheduling; --read-only is rejected for this backend. Interactive terminal mode remains Codex-only. The dashboard supports managed headless tasks and fresh follow-ups.
 

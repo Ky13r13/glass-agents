@@ -57,9 +57,13 @@ function elapsed(job) {
 function clip(text, size) { text = String(text || ''); return text.length > size ? text.slice(0, size - 1) + '…' : text; }
 function setView(view) {
   currentView = view;
+  renderSetupCard();
   for (const item of document.querySelectorAll('.view')) item.hidden = item.id !== 'view-' + view;
   for (const item of document.querySelectorAll('[data-view]')) item.classList.toggle('active', item.dataset.view === view);
   if (state) { renderConnections(true); renderHistory(); }
+}
+function renderSetupCard() {
+  $('setup-card').hidden = !state || state.demo || state.managed.configured || currentView !== 'agents';
 }
 function selectJob(id) {
   if (selected !== id) focus = null;
@@ -722,6 +726,7 @@ async function refresh() {
     $('server-state').textContent = 'Connected'; $('server-dot').classList.remove('down');
     $('project-name').textContent = state.project; $('project-info').title = state.root;
     $('demo-banner').hidden = !state.demo;
+    renderSetupCard();
     const active = state.jobs.filter(j => activeStates.has(j.status)).length;
     const queued = state.jobs.filter(j => j.status === 'queued').length;
     $('agent-count').textContent = state.jobs.length;
@@ -785,6 +790,18 @@ for (const item of document.querySelectorAll('[data-tab]')) item.addEventListene
 for (const item of document.querySelectorAll('[data-close]')) item.addEventListener('click', () => $(item.dataset.close).close());
 $('new-agent').addEventListener('click', () => openLaunch());
 $('empty-launch').addEventListener('click', () => openLaunch());
+$('setup-agents').addEventListener('click', async () => {
+  $('setup-agents').disabled = true;
+  try { await api('/api/setup', {agents: true}); await refresh(); toast('Starter agents are ready.'); }
+  catch (error) { toast(error.message); }
+  finally { $('setup-agents').disabled = false; }
+});
+$('setup-project').addEventListener('click', async () => {
+  $('setup-project').disabled = true;
+  try { await api('/api/setup', {agents: false}); await refresh(); toast('Workspace settings are ready.'); }
+  catch (error) { toast(error.message); }
+  finally { $('setup-project').disabled = false; }
+});
 $('repeat-agent').addEventListener('click', () => openLaunch(jobById(selected)));
 $('flow-clear').addEventListener('click', () => {
   const id = focus?.id;
@@ -850,4 +867,5 @@ document.addEventListener('keydown', e => {
   const tag = document.activeElement.tagName;
   if (e.key.toLowerCase() === 'n' && !e.metaKey && !e.ctrlKey && !['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) && !$('launch-dialog').open && !$('artifact-dialog').open) openLaunch();
 });
+$('glass-mascot').append(brandPortrait());
 refresh(); setInterval(refresh, 1000);

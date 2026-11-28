@@ -5,9 +5,7 @@ import fnmatch
 import json
 import os
 from pathlib import Path
-import selectors
 import shutil
-import signal
 import subprocess
 import sys
 import threading
@@ -16,23 +14,9 @@ import time
 from .common import Store, UserError, digest, local_lock, new_id, now, read_text, safe_terminal, state_dir, write_json, write_text
 from .context import build_packet, packet_summary
 from .local import Ollama
+from .processes import managed_process, pipe_chunks
 from .project import changed_since, guidance_sources, redact, snapshot
-from .adapters import opencode_command
-
-
-def stop_process(process, grace=3):
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    try:
-        process.wait(timeout=grace)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait(timeout=3)
+from .adapters import opencode_command, provider_argv
 
 
 def stream_process(argv, cwd, input_path, folder, timeout, consume, stop=None, env=None, on_start=None, termination_grace=3):
@@ -42,55 +26,52 @@ def stream_process(argv, cwd, input_path, folder, timeout, consume, stop=None, e
         raise UserError("Run cancelled.")
     deadline = time.monotonic() + timeout
     total = 0
-    with open(input_path, "rb") as prompt, open(folder / "events.jsonl", "wb") as output, open(folder / "stderr.log", "wb") as errors:
-        try:
-            proc = subprocess.Popen(argv, cwd=cwd, stdin=prompt, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    start_new_session=True, env=env)
-        except OSError as exc:
-            raise UserError(f"Cannot launch {argv[0]}: {exc}") from exc
-        pending = b""
-        try:
-            if on_start:
-                on_start(proc.pid)
-            with selectors.DefaultSelector() as selector:
-                selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
-                selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
-                while selector.get_map() or proc.poll() is None:
-                    if stop.is_set():
-                        raise UserError("Run cancelled.")
-                    if time.monotonic() > deadline:
-                        raise UserError(f"Run exceeded the {timeout}s time limit.")
-                    for key, _ in selector.select(timeout=0.2):
-                        data = os.read(key.fileobj.fileno(), 65536)
-                        if not data:
-                            selector.unregister(key.fileobj)
-                            continue
+    def check():
+        if stop.is_set():
+            raise UserError("Run cancelled.")
+        if time.monotonic() > deadline:
+            raise UserError(f"Run exceeded the {timeout}s time limit.")
+
+    try:
+        with (open(input_path, "rb") as prompt, open(folder / "events.jsonl", "wb") as output,
+              open(folder / "stderr.log", "wb") as errors,
+              managed_process(argv, cwd=cwd, stdin=prompt, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=env) as (proc, terminate)):
+            pending = b""
+            try:
+                if on_start:
+                    on_start(proc.pid)
+                with contextlib.closing(pipe_chunks(proc, check)) as chunks:
+                    for channel, data in chunks:
                         total += len(data)
                         if total > 16 * 1024 * 1024:
                             raise UserError("Run exceeded the 16 MiB combined output limit.")
-                        if key.data == "stderr":
+                        if channel == "stderr":
                             errors.write(data)
                             errors.flush()
                         else:
                             output.write(data)
                             output.flush()
                             pending += data
-                            while b"\n" in pending:
-                                line, pending = pending.split(b"\n", 1)
-                                consume(line)
+                            lines = pending.split(b"\n")
+                            pending = lines.pop()
+                            for line in lines:
+                                consume(line + b"\n")
                 if pending.strip():
                     consume(pending)
-            return proc.wait(timeout=3)
-        except BaseException:
-            stop_process(proc, termination_grace)
-            raise
-        finally:
-            proc.stdout.close()
-            proc.stderr.close()
+                while (rc := proc.poll()) is None:
+                    check()
+                    stop.wait(0.2)
+                return rc
+            except BaseException:
+                terminate(termination_grace)
+                raise
+    except OSError as exc:
+        raise UserError(f"Could not run {argv[0]}: {exc}") from exc
 
 
 def codex_command(cfg, root, output_path, permission, model=None, backend="codex", output_schema=None):
-    cmd = [cfg["codex_bin"], "--ask-for-approval", "never", "exec", "--json", "--color", "never",
+    cmd = [*provider_argv(cfg, "codex"), "--ask-for-approval", "never", "exec", "--json", "--color", "never",
            "--sandbox", permission, "-c", "features.multi_agent=false", "--cd", str(root),
            "--output-last-message", str(output_path)]
     if not (root / ".git").exists():
@@ -310,7 +291,7 @@ def execute_run(root, cfg, record, stop=None, handoff=True, quiet=False, observe
                                       "workflow": record["agent_workflow"], "goal": record["goal"],
                                       "context": read_text(packet), "demo": record.get("loop_demo", False)})
             cmd = [sys.executable, "-m", "agentctl.feedback_worker"]
-            env = dict(os.environ)
+            env = dict(os.environ, PYTHONUTF8="1")
             package_path = str(Path(__file__).parent.parent)
             env["PYTHONPATH"] = package_path + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
             input_path = request_path
@@ -321,7 +302,7 @@ def execute_run(root, cfg, record, stop=None, handoff=True, quiet=False, observe
                 request["schema"] = json.loads(read_text(schema))
             write_json(request_path, request)
             cmd = [sys.executable, "-m", "agentctl.local_worker"]
-            env = dict(os.environ)
+            env = dict(os.environ, PYTHONUTF8="1")
             package_path = str(Path(__file__).parent.parent)
             env["PYTHONPATH"] = package_path + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
             input_path = request_path
@@ -419,28 +400,28 @@ def verify(root, cfg, run_id, argv, stop=None):
     started = now()
     with open(path, "wb") as log:
         try:
-            proc = subprocess.Popen(argv, cwd=root, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-            try:
-                deadline = time.monotonic() + cfg["timeout_seconds"]
-                while proc.poll() is None:
-                    if stop and stop.is_set():
-                        stop_process(proc)
-                        rc = 130
-                        break
-                    if time.monotonic() >= deadline:
-                        raise subprocess.TimeoutExpired(argv, cfg["timeout_seconds"])
-                    try:
-                        proc.wait(timeout=0.2)
-                    except subprocess.TimeoutExpired:
-                        continue
-                else:
-                    rc = proc.returncode
-            except subprocess.TimeoutExpired:
-                stop_process(proc)
-                rc = 124
-            except KeyboardInterrupt:
-                stop_process(proc)
-                rc = 130
+            with managed_process(argv, cwd=root, stdout=log, stderr=subprocess.STDOUT) as (proc, terminate):
+                try:
+                    deadline = time.monotonic() + cfg["timeout_seconds"]
+                    while proc.poll() is None:
+                        if stop and stop.is_set():
+                            terminate(3)
+                            rc = 130
+                            break
+                        if time.monotonic() >= deadline:
+                            raise subprocess.TimeoutExpired(argv, cfg["timeout_seconds"])
+                        try:
+                            proc.wait(timeout=0.2)
+                        except subprocess.TimeoutExpired:
+                            continue
+                    else:
+                        rc = proc.returncode
+                except subprocess.TimeoutExpired:
+                    terminate(3)
+                    rc = 124
+                except KeyboardInterrupt:
+                    terminate(3)
+                    rc = 130
         except OSError as exc:
             log.write(str(exc).encode())
             rc = 127

@@ -7,10 +7,11 @@ import json
 from pathlib import Path
 import re
 
-from .common import UserError, digest, read_text, state_dir, write_json
+from .common import UserError, digest, is_link, read_text, state_dir, write_json
 
 NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,39}")
 BACKENDS = {"claude-sdk", "codex", "opencode", "local", "codex-local"}
+MAX_MANAGED_AGENTS = 250
 LIMITS = {"max_iterations": 3, "max_agent_calls": 12, "max_tool_calls": 40,
           "max_depth": 3, "timeout_seconds": 900, "max_turns_per_agent": 12,
           "max_reported_cost_usd": 5.0}
@@ -24,7 +25,7 @@ def config_path(root, path=None):
     if not target.resolve().is_relative_to(root):
         raise UserError("Agent configuration must be inside the project.")
     relative = target.relative_to(root)
-    if any(root.joinpath(*relative.parts[:i]).is_symlink() for i in range(1, len(relative.parts) + 1)):
+    if any(is_link(root.joinpath(*relative.parts[:i])) for i in range(1, len(relative.parts) + 1)):
         raise UserError("Agent configuration must not use symlinks.")
     return target
 
@@ -98,8 +99,8 @@ def validate_config(supplied):
         raise UserError("Unknown agent configuration fields: " + ", ".join(sorted(unknown)))
     config = copy.deepcopy(supplied)
     agents, tools, workflows = (config.get(k) for k in ("agents", "tools", "workflows"))
-    if not isinstance(agents, dict) or not 1 <= len(agents) <= 30:
-        raise UserError("Define between 1 and 30 managed agents.")
+    if not isinstance(agents, dict) or not 1 <= len(agents) <= MAX_MANAGED_AGENTS:
+        raise UserError(f"Define between 1 and {MAX_MANAGED_AGENTS} managed agents.")
     if not isinstance(tools, dict) or len(tools) > 40:
         raise UserError("tools must be an object with at most 40 configured commands.")
     if not isinstance(workflows, dict) or not workflows:

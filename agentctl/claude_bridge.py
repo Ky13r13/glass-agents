@@ -140,6 +140,13 @@ async def sdk_call(runtime, actor, prompt, stack, schema):
         runtime.state["cost_coverage"] = "partial: one or more calls omitted a cost estimate"
     runtime.emit("agent.usage", actor, usage=usage, reported_cost_usd=cost,
                  session_id=getattr(result, "session_id", None))
+    return structured_result(result)
+
+
+def structured_result(result):
+    """Interpret the SDK's terminal message before accepting its structured output."""
+    if result is None:
+        raise UserError("Claude SDK ended without a result message.")
     if (getattr(result, "is_error", False) or getattr(result, "subtype", "") != "success"
             or getattr(result, "stop_reason", None) == "refusal"
             or getattr(result, "terminal_reason", None) not in {None, "completed"}):

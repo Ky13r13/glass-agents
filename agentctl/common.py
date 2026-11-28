@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import math
@@ -10,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import threading
@@ -82,7 +82,7 @@ def digest(data):
 def write_text(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
+    if is_link(path):
         raise UserError(f"Refusing to overwrite a symlink: {path}")
     fd, name = tempfile.mkstemp(prefix=".agentctl-tmp-", dir=path.parent)
     try:
@@ -103,8 +103,9 @@ def read_text(path):
 
 
 def run_command(argv, cwd=None, timeout=15, check=False):
+    from .processes import native_argv
     try:
-        p = subprocess.run(argv, cwd=cwd, capture_output=True, timeout=timeout)
+        p = subprocess.run(native_argv(argv), cwd=cwd, capture_output=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         if check:
             raise UserError(f"Could not run {argv[0]}: {exc}") from exc
@@ -127,13 +128,22 @@ def project_root(path):
     return path
 
 
+def is_link(path):
+    if os.name != "nt":
+        return path.is_symlink()
+    try:
+        return bool(path.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+
+
 def state_dir(root):
     result = root / ".agentctl"
-    if result.is_symlink():
+    if is_link(result):
         raise UserError(".agentctl must be a real directory, not a symlink.")
     for name in ("runs", "plans", "teams", "benchmarks", "state.sqlite3", "HANDOFF.md", "handoff.json", "config.toml", "operation.lock",
                  "dashboard.lock", "dashboard-jobs.json", "dashboard-settings.json"):
-        if (result / name).is_symlink():
+        if is_link(result / name):
             raise UserError(f"agentctl state must not contain symlinked storage: {name}")
     return result
 
@@ -172,15 +182,29 @@ def require_init(root):
 def lock(path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a") as handle:
+    with open(path, "a+b") as handle:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if os.name == "nt":
+                import msvcrt
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise UserError(f"Another operation holds {path}. Wait for it to finish.") from exc
+        except PermissionError as exc:
+            if os.name != "nt":
+                raise
+            raise UserError(f"Could not lock {path}. Check permissions and other running operations.") from exc
         try:
             yield
         finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def local_lock():

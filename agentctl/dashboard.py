@@ -10,7 +10,6 @@ import json
 import os
 from pathlib import Path
 import secrets
-import shlex
 import shutil
 import sys
 import tempfile
@@ -20,10 +19,14 @@ from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
 from . import __version__
-from .adapters import connection_info, event_summary, process_connections
+from .adapters import connection_info, event_summary, process_connections, provider_argv
 from .common import Store, UserError, load_config, lock, new_id, now, read_text, run_command, state_dir, write_json
+from .dashboard_teams import read_team_config, save_team, team_state
+from .draft_session import DraftSession
 from .project import initialize, inventory, redact, report
+from .processes import native_argv, split_command
 from .runner import execute_run, prepare_run, verify
+from .team_draft import draft_team
 from .workflows import catalog, compile_workflow
 
 ACTIVE = {"preparing", "running", "stopping"}
@@ -44,6 +47,8 @@ class Dashboard:
         self.cfg = cfg or load_config(self.root)
         self.demo = demo
         self.guard = threading.RLock()
+        self.draft_guard = threading.Lock()
+        self.drafts = DraftSession(self.draft_team)
         self.closed = threading.Event()
         self.wake = threading.Event()
         self.active = {}
@@ -97,7 +102,7 @@ class Dashboard:
     def config(self):
         return dict(self.cfg, **self.settings)
 
-    def enqueue(self, spec):
+    def enqueue(self, spec, *, team_revision=None):
         if not isinstance(spec, dict):
             raise UserError("Expected a task object.")
         goal = bounded_text(spec.get("goal"), "Task")
@@ -146,6 +151,8 @@ class Dashboard:
                    "depends_on": depends, "parent": spec.get("parent"), "run_id": None, "write_scope": scope,
                    "agent_workflow": agent_workflow if backend == "claude-sdk" else None,
                    "status": "queued", "connection": connection_info(self.root, backend, model, self.config())}
+            if team_revision is not None:
+                job["team_revision"] = team_revision
             self.jobs.append(job)
             self.persist()
             self.wake.set()
@@ -280,6 +287,8 @@ class Dashboard:
                 raise UserError("Run cancelled before context preparation.")
             if job["backend"] == "claude-sdk":
                 from .agent_config import prepare_feedback
+                if "team_revision" in job and job["team_revision"] != read_team_config(self.root)[1]:
+                    raise UserError("Agent definitions changed after this team was queued. Launch it again from Teams.")
                 rec = prepare_feedback(self.root, cfg, job["goal"], job.get("agent_workflow") or "default",
                                        includes=job["includes"], carry=carry, extra="\n\n".join(dependencies),
                                        parent=parent_run, model=job["model"])
@@ -332,10 +341,14 @@ class Dashboard:
         if backend not in {"codex", "opencode"}:
             raise UserError("Choose Codex or OpenCode.")
         binary = self.config()[backend + "_bin"]
-        resolved = shutil.which(binary)
-        if not resolved:
-            return {"available": False, "binary": binary, "message": "Executable not found. Set its absolute path."}
-        result = run_command([resolved, "--version"], self.root, timeout=8)
+        try:
+            argv = native_argv(provider_argv(self.config(), backend))
+            resolved = shutil.which(argv[0])
+            if not resolved:
+                raise OSError("Executable not found. Set its absolute path.")
+        except OSError as exc:
+            return {"available": False, "binary": binary, "message": str(exc)}
+        result = run_command([*argv, "--version"], self.root, timeout=8)
         return {"available": bool(result and result.returncode == 0), "binary": resolved,
                 "message": redact((result.stdout + result.stderr).decode(errors="replace")[:2000]) if result else "Version check timed out.",
                 "note": "Version check only; provider authentication was not tested."}
@@ -381,7 +394,56 @@ class Dashboard:
                 "backends": [{"id": b, "binary": settings[b + "_bin"], "resolved": shutil.which(settings[b + "_bin"]),
                               "connection": connection_info(self.root, b, cfg=self.config())} for b in ("codex", "opencode")],
                 "workflows": catalog(), "max_workers": self.cfg["max_workers"],
-                "socket_observation": "Linux process-tree TCP sample; proxies may hide the upstream destination."}
+                "socket_observation": ("Linux process-tree TCP sample; proxies may hide the upstream destination."
+                                       if sys.platform.startswith("linux") else "Process socket sampling is available on Linux.")}
+
+    def setup(self, agents=False):
+        """Initialize the selected workspace from the dashboard setup flow."""
+        with self.guard, lock(state_dir(self.root) / "operation.lock"):
+            result = initialize(self.root)
+            if agents:
+                from .agent_config import initialize_agents
+                result["agents"] = initialize_agents(self.root)
+            self.cfg = load_config(self.root)
+            return result
+
+    def save_team(self, body):
+        if self.demo:
+            raise UserError("Open a project dashboard to save a team.")
+        with self.guard:
+            if self.active or self.verifying or any(j["status"] == "queued" for j in self.jobs):
+                raise UserError("Wait for the task queue to become idle before saving agent definitions.")
+            with lock(state_dir(self.root) / "operation.lock"):
+                return save_team(self.root, body)
+
+    def launch_team(self, body):
+        if self.demo:
+            raise UserError("Open a project dashboard to launch a team.")
+        with self.guard:
+            config, revision = read_team_config(self.root)
+            workflow = body.get("workflow")
+            if revision is None or body.get("revision") != revision:
+                raise UserError("Save or reload the team before launching.")
+            if workflow not in config["workflows"]:
+                raise UserError("Choose a saved workflow.")
+            return self.enqueue({"name": workflow, "goal": body.get("goal"), "backend": "claude-sdk",
+                                 "permission": "workspace-write", "agent_workflow": workflow},
+                                team_revision=revision)
+
+    def draft_team(self, body, *, stop=None, progress=None):
+        goal = bounded_text(body.get("goal"), "Task")
+        if self.demo:
+            raise UserError("Open a project dashboard to use the AI planner.")
+        if not self.draft_guard.acquire(blocking=False):
+            raise UserError("Glass is already drafting a team for this workspace.")
+        try:
+            config, revision = read_team_config(self.root)
+            result = draft_team(goal, body.get("mode"), body.get("backends"), config, self.config(),
+                                stop if stop is not None else self.closed, provider=body.get("provider", "codex"),
+                                progress=progress)
+            return dict(result, revision=revision)
+        finally:
+            self.draft_guard.release()
 
     def agent_message(self, ident, recipient, message):
         from .agent_runtime import send_mail
@@ -467,7 +529,7 @@ class Dashboard:
 
     def check(self, ident, command):
         command = bounded_text(command, "Verification command", 3000)
-        argv = shlex.split(command)
+        argv = split_command(command)
         if not argv:
             raise UserError("Supply a verification command.")
         rec = self.run_record(ident)
@@ -501,6 +563,7 @@ class Dashboard:
         with self.guard:
             self.closed.set()
             self.verify_stop.set()
+            self.drafts.stop.set()
             controls = list(self.active.values())
             for control in controls:
                 control["stop"].set()
@@ -514,6 +577,7 @@ class Dashboard:
             self.verify_thread.join(timeout=12)
         self.wake.set()
         self.scheduler.join(timeout=3)
+        self.drafts.close()
         with self.guard:
             if self.lease and not self.active:
                 self.lease.__exit__(None, None, None)
@@ -565,6 +629,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         url = urlsplit(self.path)
         names = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
+                 "/teams.js": ("teams.js", "text/javascript"),
                  "/portraits.js": ("portraits.js", "text/javascript"), "/style.css": ("style.css", "text/css"),
                  "/flux.webp": ("flux.webp", "image/webp"), "/droplets.webp": ("droplets.webp", "image/webp")}
         if not post and url.path in names:
@@ -583,8 +648,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if post:
                 length = int(self.headers.get("Content-Length", "0"))
-                if length < 1 or length > 65536:
-                    raise UserError("Request body must be between 1 and 65536 bytes.")
+                limit = 1024 * 1024 if url.path == "/api/team" else 65536
+                if length < 1 or length > limit:
+                    raise UserError(f"Request body must be between 1 and {limit} bytes.")
                 body = json.loads(self.rfile.read(length))
                 if not isinstance(body, dict):
                     raise UserError("Expected a JSON object.")
@@ -594,6 +660,11 @@ class Handler(BaseHTTPRequestHandler):
                     "/api/cancel": lambda: dashboard.cancel(body.get("id")),
                     "/api/followup": lambda: dashboard.followup(body.get("id"), body),
                     "/api/settings": lambda: dashboard.update_settings(body),
+                    "/api/setup": lambda: dashboard.setup(bool(body.get("agents"))),
+                    "/api/team": lambda: dashboard.save_team(body),
+                    "/api/team/draft": lambda: dashboard.drafts.start(body),
+                    "/api/team/draft/cancel": lambda: dashboard.drafts.cancel(body.get("id")),
+                    "/api/team/launch": lambda: dashboard.launch_team(body),
                     "/api/probe": lambda: dashboard.probe(body.get("backend")),
                     "/api/verify": lambda: dashboard.check(body.get("id"), body.get("command")),
                     "/api/agent-message": lambda: dashboard.agent_message(body.get("id"), body.get("to"), body.get("message")),
@@ -601,6 +672,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 routes = {
                     "/api/state": dashboard.state,
+                    "/api/team": lambda: team_state(dashboard.root),
+                    "/api/team/draft": dashboard.drafts.status,
                     "/api/events": lambda: dashboard.events(ident, int(query.get("offset", ["0"])[0])),
                     "/api/artifact": lambda: {"text": dashboard.artifact(ident, query.get("name", [""])[0])},
                     "/api/inspect": lambda: report(inventory(dashboard.root, dashboard.config())),
@@ -633,10 +706,12 @@ def serve_dashboard(root, port=8765, open_browser=True, demo=False):
         initialize(root)
         from .demo import make_runtime
         runtime = make_runtime(root)
-        cfg = dict(load_config(root), codex_bin=str(runtime), opencode_bin=str(runtime))
+        cfg = dict(load_config(root), codex_bin=sys.executable, opencode_bin=sys.executable, _demo_script=str(runtime))
     else:
+        # The dashboard is the first-run surface. Initialization is idempotent and
+        # preserves existing project guidance, so the UI can finish setup safely.
         if not (state_dir(root) / "config.toml").is_file():
-            raise UserError("Initialize this project first: agentctl init. Or preview with agentctl dashboard --demo.")
+            initialize(root)
         cfg = load_config(root)
     dashboard = Dashboard(root, cfg, demo=demo)
     server = None

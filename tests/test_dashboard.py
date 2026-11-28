@@ -15,6 +15,7 @@ import unittest
 from agentctl.adapters import connection_info, event_summary, process_connections, public_url
 from agentctl.common import Store, UserError, lock, state_dir, write_json
 from agentctl.dashboard import Dashboard, DashboardServer, TERMINAL
+from agentctl.dashboard_teams import team_state
 from agentctl.runner import execute_run, prepare_run
 from test_workflows import BaseWorkspace
 
@@ -181,6 +182,63 @@ class DashboardWorkspace(BaseWorkspace):
             manager.launch_workflow({"workflow":"bugfix","goal":"Fix","backend":"local"})
         self.assertEqual(len(manager.jobs),3)
 
+    def test_team_builder_saves_mixed_roster_and_queues_saved_workflow(self):
+        manager = self.manager()
+        manager.setup(agents=True)
+        original = team_state(self.root)
+        roster = original["agents"] + [
+            {"name": f"peer-{i}", "backend": ("claude-sdk", "codex", "local")[i % 3],
+             "model": None, "instructions": "Analyze the assigned task.", "write_scope": [],
+             "peers": ["worker"]} for i in range(17)
+        ]
+        roster[0]["peers"].append("peer-2")
+        body = {"revision": original["revision"], "agents": roster,
+                "workflow": {"name": "mixed", "lead": "worker", "reviewer": "reviewer"}}
+        saved = manager.save_team(body)
+        self.assertEqual(len(saved["agents"]), 20)
+        self.assertIn("default", saved["workflows"])
+        self.assertIn("peer-2", saved["agents"][0]["peers"])
+        with self.assertRaisesRegex(UserError, "changed"):
+            manager.save_team(body)
+        with manager.guard:
+            job = manager.launch_team({"revision": saved["revision"], "workflow": "mixed", "goal": "Inspect source"})
+            self.assertEqual(job["agent_workflow"], "mixed")
+            self.assertEqual(job["permission"], "workspace-write")
+            self.assertEqual(manager.find(job["id"])["team_revision"], saved["revision"])
+            manager.cancel(job["id"])
+
+    def test_prompt_drafts_and_saves_200_roles_without_touching_project_files(self):
+        self.cfg["codex_bin"] = str(self.base / "fake-planner")
+        planner = Path(self.cfg["codex_bin"])
+        planner.write_text("""#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+args = sys.argv
+assert args[args.index("--sandbox") + 1] == "read-only"
+assert Path.cwd().name.startswith("agentctl-team-draft-")
+assert "working inventory app" in sys.stdin.read()
+roles = [dict(name=f"role-{i}", backend="local", instructions=f"Analyze inventory requirement {i}.",
+              write_scope=[], peers=[]) for i in range(199)]
+lead = dict(name="lead", backend="codex", instructions="Build the project using delegated input.",
+            write_scope=["**"], peers=[role["name"] for role in roles])
+Path(args[args.index("--output-last-message") + 1]).write_text(json.dumps(
+    dict(lead="lead", reviewer="", summary="Fixture-generated proposal.", agents=[lead, *roles])))
+""")
+        planner.chmod(0o755)
+        manager = self.manager()
+        draft = manager.draft_team({"goal": "Build a working inventory app.", "mode": "scaffold",
+                                   "backends": ["codex", "local"]})
+        self.assertEqual(len(draft["agents"]), 200)
+        self.assertIn("minimal runnable project", draft["agents"][0]["instructions"])
+        self.assertFalse((state_dir(self.root) / "agents.json").exists())
+        self.assertEqual(manager.jobs, [])
+        saved = manager.save_team(draft)
+        self.assertEqual(len(saved["agents"]), 200)
+        from agentctl.agent_config import load_agents
+        definitions, _ = load_agents(self.root)
+        workflow = definitions["workflows"][draft["workflow"]["name"]]
+        self.assertGreaterEqual(workflow["max_agent_calls"], 200)
+
     def test_external_operation_lock_holds_queue_and_queued_tasks_can_cancel(self):
         manager = self.manager()
         with lock(state_dir(self.root)/"operation.lock"):
@@ -211,7 +269,8 @@ class DashboardWorkspace(BaseWorkspace):
             self.assertIn("dashboard: http://127.0.0.1:",line)
             port=int(line.rsplit(":",1)[1])
             conn=http.client.HTTPConnection("127.0.0.1",port,timeout=3)
-            for path,expected in [("/","/portraits.js"),("/app.js","loadEvents"),("/portraits.js","agentPortrait"),("/style.css",".workspace-grid")]:
+            for path,expected in [("/","/portraits.js"),("/app.js","loadEvents"),("/teams.js","/api/team/launch"),
+                                  ("/portraits.js","agentPortrait"),("/style.css",".workspace-grid")]:
                 conn.request("GET",path);response=conn.getresponse()
                 self.assertEqual(response.status,200)
                 self.assertIn(expected,response.read().decode())

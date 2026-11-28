@@ -10,7 +10,7 @@ import threading
 import time
 
 from .agent_config import covered, validate_value
-from .common import UserError, lock, new_id, now, read_text, write_json, write_text
+from .common import UserError, is_link, lock, new_id, now, read_text, write_json, write_text
 from .project import allowed, changed_since, inventory, redact, snapshot
 
 
@@ -156,7 +156,7 @@ class AgentRuntime:
         if ignore.is_file():
             patterns = [x.strip() for x in read_text(ignore).splitlines() if x.strip() and not x.startswith("#")]
         helper_read = not writing and rel.as_posix() in {".agentctl/REPO_MAP.md", ".agentctl/HANDOFF.md"}
-        linked = any(self.root.joinpath(*rel.parts[:i]).is_symlink() for i in range(1, len(rel.parts) + 1))
+        linked = any(is_link(self.root.joinpath(*rel.parts[:i])) for i in range(1, len(rel.parts) + 1))
         if linked or (not helper_read and not allowed(self.root, relative, patterns)):
             raise UserError("Path is outside the allowed project files, excluded, or symlinked.")
         full = self.root / rel
@@ -297,7 +297,7 @@ class AgentRuntime:
                 return text.replace("{project_root}", str(self.root)).replace("{output_dir}", str(folder))
             argv = [argument(s) for s in spec["argv"]]
             cwd = self.root / spec["cwd"]
-            if not cwd.resolve().is_relative_to(self.root) or any(p.is_symlink() for p in [cwd, *list(cwd.parents)[:len(Path(spec["cwd"]).parts)]]):
+            if not cwd.resolve().is_relative_to(self.root) or any(is_link(p) for p in [cwd, *list(cwd.parents)[:len(Path(spec["cwd"]).parts)]]):
                 raise UserError("Project tool cwd escapes the project or uses a symlink.")
             before = snapshot(self.root, self.cfg)
             self.emit("project_tool.started", actor, call_id=ident, tool=name, argv=argv, cwd=str(cwd))
